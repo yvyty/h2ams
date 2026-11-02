@@ -79,7 +79,7 @@ homebrew_casks:
     repository:
       owner: yvyty
       name: homebrew-tap
-      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+      token: '{{ index .Env "HOMEBREW_TAP_TOKEN" }}'
     directory: Casks
     homepage: https://github.com/yvyty/h2ams
     description: Run and supervise all your local dev apps from one YAML file
