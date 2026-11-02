@@ -17,7 +17,9 @@ import (
 //
 //	H2AMS_TEST_TRAY=1 go test -run TrayBinarySmoke ./internal/tray/
 //
-// CI runs it under xvfb-run and dbus-run-session on Linux.
+// CI runs it under xvfb-run and dbus-run-session on Linux, where the test
+// also plays the panel (a fake StatusNotifierWatcher) and checks that the
+// tray registers its icon.
 func TestTrayBinarySmoke(t *testing.T) {
 	if os.Getenv("H2AMS_TEST_TRAY") != "1" {
 		t.Skip("set H2AMS_TEST_TRAY=1 to start the real tray (needs a desktop session)")
@@ -43,6 +45,8 @@ func TestTrayBinarySmoke(t *testing.T) {
 	}
 	defer logFile.Close()
 
+	registered := startWatcher(t) // Linux: a fake panel to register with
+
 	first := exec.Command(trayBin)
 	first.Stdout, first.Stderr = logFile, logFile
 	if err := first.Start(); err != nil {
@@ -63,6 +67,9 @@ func TestTrayBinarySmoke(t *testing.T) {
 	}
 	if log, _ := os.ReadFile(logPath); len(log) > 0 {
 		t.Errorf("tray wrote to its log while idle:\n%s", log)
+	}
+	if registered != nil && !registered() {
+		t.Error("tray never registered its icon with the StatusNotifierWatcher")
 	}
 
 	second := exec.Command(trayBin)
