@@ -56,6 +56,12 @@ func Run(ctx context.Context, opts Options) error {
 	if err := os.MkdirAll(opts.Paths.Dir, 0o700); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
 	}
+	// Record the project before listening: a socket accepts connections as
+	// soon as it listens, and callers (h2ams-tray, KnownProjects) take a
+	// reachable socket to mean the project is registered.
+	if err := writeProject(opts.Paths, configPath); err != nil && opts.Log != nil {
+		fmt.Fprintf(opts.Log, "%s recording project for h2ams-tray failed: %v\n", time.Now().Format(time.RFC3339), err)
+	}
 	ln, err := listen(opts.Paths.Socket)
 	if err != nil {
 		return err
@@ -126,11 +132,8 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	// Serve the socket last: once it answers, svc.info is final, and
-	// "h2ams up" treats a reachable socket as "ready".
-	if err := writeProject(opts.Paths, configPath); err != nil {
-		logf("recording project for h2ams-tray failed: %v", err)
-	}
+	// Serve the socket last: connections made since listen wait in the
+	// backlog, so every request sees the final svc.info.
 	serveHTTP(ctx, &wg, ln, a.socketHandler())
 
 	<-ctx.Done()
