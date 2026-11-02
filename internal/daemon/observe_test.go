@@ -1,5 +1,3 @@
-//go:build unix
-
 package daemon
 
 import (
@@ -7,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -115,6 +114,9 @@ func TestNoDefaultEnvironmentStartsAllApps(t *testing.T) {
 }
 
 func TestStatusReportsResources(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CPU and memory are not measured on Windows yet")
+	}
 	dir := shortTempDir(t)
 	cfgPath := writeConfig(t, dir, map[string]string{"api": testutil.Command(testutil.Sleep, "")})
 	opts := Options{ConfigPath: cfgPath, Paths: NewPaths(filepath.Join(dir, "state"))}

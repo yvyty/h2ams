@@ -1,5 +1,7 @@
 # H2AMS
 
+[![CI](https://github.com/yvyty/h2ams/actions/workflows/ci.yml/badge.svg)](https://github.com/yvyty/h2ams/actions/workflows/ci.yml)
+
 **High Availability Application Management Service.** Run all the apps you
 develop against (APIs, frontends, workers) from one `h2ams.yml` instead of a
 pile of terminal tabs. A background daemon keeps them running, restarts them

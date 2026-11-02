@@ -1,5 +1,3 @@
-//go:build unix
-
 package cli
 
 import (
@@ -18,6 +16,7 @@ import (
 	"github.com/yvyty/h2ams/internal/config"
 	"github.com/yvyty/h2ams/internal/daemon"
 	"github.com/yvyty/h2ams/internal/process"
+	"github.com/yvyty/h2ams/internal/testutil"
 )
 
 func TestStatusAndDownWhenNotRunning(t *testing.T) {
@@ -147,7 +146,7 @@ func TestBinaryUpStatusDown(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(work) })
 
-	bin := filepath.Join(work, "h2ams")
+	bin := filepath.Join(work, "h2ams"+exeSuffix)
 	if out, err := exec.Command("go", "build", "-o", bin, "github.com/yvyty/h2ams/cmd/h2ams").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
@@ -158,7 +157,7 @@ func TestBinaryUpStatusDown(t *testing.T) {
 	}
 	dashPort := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
-	os.WriteFile(cfg, []byte(fmt.Sprintf("version: 1\ndashboard:\n  port: %d\napps:\n  sleeper:\n    command: echo hello-from-app; sleep 60\n", dashPort)), 0o644)
+	os.WriteFile(cfg, []byte(fmt.Sprintf("version: 1\ndashboard:\n  port: %d\napps:\n  sleeper:\n    command: %q\n", dashPort, testutil.Command(testutil.Print, "hello-from-app"))), 0o644)
 
 	h2ams := func(args ...string) string {
 		t.Helper()

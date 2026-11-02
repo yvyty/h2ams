@@ -1,5 +1,3 @@
-//go:build unix
-
 package daemon
 
 import (
@@ -8,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -138,6 +137,9 @@ func TestContextCancelStopsApps(t *testing.T) {
 }
 
 func TestStatusReportsPorts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ports are not measured on Windows yet")
+	}
 	dir := shortTempDir(t)
 	out := filepath.Join(dir, "port")
 	cfgPath := writeConfig(t, dir, map[string]string{"web": testutil.Command(testutil.Listen, out)})
@@ -167,16 +169,16 @@ func TestStatusReportsPorts(t *testing.T) {
 func TestLogsSurviveRestart(t *testing.T) {
 	dir := shortTempDir(t)
 	cfgPath := filepath.Join(dir, config.DefaultFileName)
-	os.WriteFile(cfgPath, []byte(`version: 1
+	os.WriteFile(cfgPath, []byte(fmt.Sprintf(`version: 1
 dashboard:
   enabled: false
 apps:
   flaky:
-    command: echo out-line; echo err-line >&2; exit 1
+    command: %q
     restart:
       max_attempts: 1
       backoff: 10ms
-`), 0o644)
+`, testutil.Command(testutil.Fail, ""))), 0o644)
 	paths := NewPaths(filepath.Join(dir, "state"))
 	errCh := startDaemon(t, Options{ConfigPath: cfgPath, Paths: paths})
 

@@ -13,8 +13,10 @@ func newShellCommand(command string) *exec.Cmd {
 		shell = "cmd.exe"
 	}
 	cmd := exec.Command(shell)
+	// /S with outer quotes: cmd strips exactly those quotes and runs the rest
+	// as written, even when the command itself starts with a quoted path.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:       `/C ` + command,
+		CmdLine:       `/S /C "` + command + `"`,
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
 	return cmd

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -202,7 +203,12 @@ func TestUpArgsAndOpenCommand(t *testing.T) {
 
 func TestRunnerReportsCLIErrors(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "h2ams")
-	os.WriteFile(bin, []byte("#!/bin/sh\necho 'Error: h2ams.yml: invalid config' >&2\nexit 1\n"), 0o755)
+	script := "#!/bin/sh\necho 'Error: h2ams.yml: invalid config' >&2\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		bin += ".bat"
+		script = "@>&2 echo Error: h2ams.yml: invalid config\r\n@exit /b 1\r\n"
+	}
+	os.WriteFile(bin, []byte(script), 0o755)
 	err := Runner{H2ams: bin}.Run(Action{Kind: ActUp, ConfigPath: "/p/h2ams.yml"})
 	if err == nil || err.Error() != "h2ams.yml: invalid config" {
 		t.Errorf("err = %v", err)
@@ -245,6 +251,9 @@ func TestIcon(t *testing.T) {
 func TestFindH2amsOnPath(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "h2ams")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // LookPath only finds names with a PATHEXT extension
+	}
 	os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755)
 	t.Setenv("PATH", dir)
 	got, err := FindH2ams()

@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            for f in $unformatted; do echo "::error file=$f::not gofmt-formatted (run gofmt -w $f)"; done
+            exit 1
+          fi
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Everything that builds without cgo, cross-compiled from Linux.
+          - name: cgo-free
+            os: ubuntu-latest
+          # The macOS tray needs cgo, so it is built on a Mac.
+          - name: macos-tray
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build h2ams everywhere and h2ams-tray for Linux and Windows
+        if: matrix.name == 'cgo-free'
+        run: |
+          set -e
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64; do
+            os=${target%/*}; arch=${target#*/}
+            echo "h2ams $target"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o /dev/null ./cmd/h2ams
+          done
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}; arch=${target#*/}
+            echo "h2ams-tray $target"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o /dev/null ./cmd/h2ams-tray
+          done
+      - name: Build h2ams-tray for macOS (cgo)
+        if: matrix.name == 'macos-tray'
+        run: |
+          set -e
+          for arch in arm64 amd64; do
+            echo "h2ams-tray darwin/$arch"
+            CGO_ENABLED=1 GOARCH=$arch go build -o /dev/null ./cmd/h2ams-tray
+          done
+
+  docker:
+    name: real Docker (linux)
+    # Pulls an image, so only on pushes to main.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run the real-container test
+        env:
+          H2AMS_TEST_DOCKER: "1"
+        run: go test -count=1 -run RealDocker -v ./internal/daemon/
