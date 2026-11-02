@@ -38,19 +38,51 @@ worker  running  14956  -      0.9%  3.1 MiB   0         3m12s   -
 
 ## Install
 
-Requires Go 1.27 or newer. Runs on macOS and Linux; Windows support is
-best-effort (see [Platform support](#platform-support)).
+Each release ships `h2ams` and `h2ams-tray` together for macOS, Linux, and
+Windows (amd64 and arm64). Keep both in the same folder: `h2ams up` starts
+the `h2ams-tray` next to it.
+
+**Homebrew** (macOS and Linux):
+
+```sh
+brew install --cask yvyty/tap/h2ams
+```
+
+**Download** the archive for your platform from
+[Releases](https://github.com/yvyty/h2ams/releases), check it against
+`checksums.txt`, and put both binaries on your `PATH`:
+
+```sh
+# macOS / Linux (example: macOS on Apple silicon)
+tar -xzf h2ams_<version>_darwin_arm64.tar.gz
+sudo mv h2ams h2ams-tray /usr/local/bin/
+# macOS only: the binaries are ad-hoc signed, not notarized, so clear the
+# download quarantine once (Homebrew does this for you)
+xattr -d com.apple.quarantine /usr/local/bin/h2ams /usr/local/bin/h2ams-tray
+```
+
+On Windows, unzip `h2ams_<version>_windows_amd64.zip` into a folder such as
+`%LocalAppData%\Programs\h2ams` and add that folder to your user `PATH`
+(Settings → System → About → Advanced system settings → Environment
+Variables). Windows 10 1803 or newer is required.
+
+**With Go** (1.27 or newer):
 
 ```sh
 go install github.com/yvyty/h2ams/cmd/h2ams@latest
+go install github.com/yvyty/h2ams/cmd/h2ams-tray@latest
 ```
 
-Or build from a checkout:
+Go puts them in `$(go env GOPATH)/bin`, usually `~/go/bin`. If `h2ams` is
+"not found" afterwards, add that folder to your `PATH`, for example in
+`~/.zshrc` or `~/.bashrc`:
 
 ```sh
-git clone <repo-url> h2ams && cd h2ams
-go build -o bin/h2ams ./cmd/h2ams
+export PATH="$HOME/go/bin:$PATH"
 ```
+
+`h2ams-tray` needs cgo on macOS, so `go install` of the tray there needs the
+Xcode command-line tools (`xcode-select --install`).
 
 Check it works with `h2ams --version`.
 
