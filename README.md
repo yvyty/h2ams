@@ -309,6 +309,19 @@ programs, which do get a polite close first).
   macOS, allow notifications for Script Editor in System Settings. Failures
   are logged to `daemon.log`.
 
+## Versioning
+
+h2ams follows [Semantic Versioning](https://semver.org/). Before 1.0, a minor
+release (0.2.0) may change the config format or CLI, and the
+[changelog](CHANGELOG.md) says how to update; patch releases (0.1.1) only fix
+bugs.
+
+The HTTP API is versioned separately, in its path (`/api/v1`). Within `v1`,
+fields and states may be added but never removed or renamed, so clients
+should ignore what they don't know. A breaking API change gets `/api/v2`,
+served next to `v1` for at least one minor release. `h2ams --version` prints
+the release, and every API response carries `"api_version"`.
+
 ## Development
 
 ```sh

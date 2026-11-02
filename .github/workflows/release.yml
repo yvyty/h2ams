@@ -1,0 +1,37 @@
+name: Release
+
+# Pushing a tag like v0.1.0 (or v0.1.0-rc.1) builds every binary with
+# GoReleaser and creates a draft GitHub Release to review and publish.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # macOS: the tray needs cgo there; Linux and Windows builds cross-compile.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser reads tags and history
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify macOS signatures
+        run: |
+          set -e
+          for bin in dist/*darwin*/h2ams dist/*darwin*/h2ams-tray; do
+            codesign --verify --strict "$bin"
+            echo "signed: $bin"
+          done
