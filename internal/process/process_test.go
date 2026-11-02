@@ -1,0 +1,252 @@
+//go:build unix
+
+package process
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/yvyty/h2ams/internal/config"
+	"github.com/yvyty/h2ams/internal/testutil"
+)
+
+func TestMain(m *testing.M) {
+	testutil.RunHelperIfRequested()
+	os.Exit(m.Run())
+}
+
+const timeout = 5 * time.Second
+
+func spec(mode, out string) Spec {
+	return Spec{
+		Name:        "app",
+		Command:     testutil.Command(mode, out),
+		Policy:      config.RestartOnFailure,
+		MaxAttempts: 3,
+		Backoff:     10 * time.Millisecond,
+		StopTimeout: 2 * time.Second,
+	}
+}
+
+func waitState(t *testing.T, p *Process, want State) Status {
+	t.Helper()
+	var st Status
+	if !testutil.WaitFor(timeout, func() bool { st = p.Status(); return st.State == want }) {
+		t.Fatalf("state = %q, want %q (status %+v)", st.State, want, st)
+	}
+	return st
+}
+
+func TestStartRunsInCwd(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	out := filepath.Join(t.TempDir(), "cwd")
+	s := spec(testutil.WriteCwd, out)
+	s.Dir = dir
+
+	p := Start(s)
+	defer p.Stop()
+
+	st := waitState(t, p, StateRunning)
+	if st.PID == 0 || st.StartedAt.IsZero() {
+		t.Errorf("running status missing pid/start time: %+v", st)
+	}
+	got, ok := testutil.ReadFile(out, timeout)
+	if !ok {
+		t.Fatal("helper never wrote its cwd")
+	}
+	if got, _ = filepath.EvalSymlinks(got); got != dir {
+		t.Errorf("cwd = %q, want %q", got, dir)
+	}
+}
+
+func TestStopTerminatesProcess(t *testing.T) {
+	p := Start(spec(testutil.Sleep, ""))
+	pid := waitState(t, p, StateRunning).PID
+
+	p.Stop()
+
+	if st := p.Status(); st.State != StateStopped || st.PID != 0 {
+		t.Errorf("after Stop status = %+v", st)
+	}
+	if testutil.Alive(pid) {
+		t.Errorf("pid %d still alive after Stop", pid)
+	}
+}
+
+func TestStopKillsChildProcesses(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "pid")
+	s := spec(testutil.WritePID, out)
+	s.Command += " & wait" // the helper becomes a grandchild under the shell
+
+	p := Start(s)
+	waitState(t, p, StateRunning)
+	raw, ok := testutil.ReadFile(out, timeout)
+	if !ok {
+		t.Fatal("grandchild never wrote its pid")
+	}
+	child, _ := strconv.Atoi(raw)
+
+	p.Stop()
+
+	if !testutil.WaitFor(timeout, func() bool { return !testutil.Alive(child) }) {
+		t.Errorf("grandchild %d survived Stop", child)
+	}
+}
+
+func TestStopEscalatesToKill(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "ready")
+	s := spec(testutil.IgnoreTerm, out)
+	s.StopTimeout = 100 * time.Millisecond
+
+	p := Start(s)
+	pid := waitState(t, p, StateRunning).PID
+	if _, ok := testutil.ReadFile(out, timeout); !ok {
+		t.Fatal("helper never became ready")
+	}
+
+	start := time.Now()
+	p.Stop()
+
+	if testutil.Alive(pid) {
+		t.Errorf("pid %d ignored SIGTERM and was not killed", pid)
+	}
+	if elapsed := time.Since(start); elapsed < s.StopTimeout {
+		t.Errorf("Stop returned after %v, before the %v grace period", elapsed, s.StopTimeout)
+	}
+}
+
+func TestCrashIsRestarted(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "marker")
+	p := Start(spec(testutil.CrashOnce, out))
+	defer p.Stop()
+
+	if !testutil.WaitFor(timeout, func() bool { st := p.Status(); return st.State == StateRunning && st.Restarts == 1 }) {
+		t.Fatalf("expected running after one restart, got %+v", p.Status())
+	}
+}
+
+func TestMaxAttemptsMarksFailed(t *testing.T) {
+	s := spec(testutil.Crash, "")
+	s.MaxAttempts = 2
+	s.Backoff = 50 * time.Millisecond
+
+	start := time.Now()
+	p := Start(s)
+	select {
+	case <-p.Done():
+	case <-time.After(timeout):
+		t.Fatalf("process never gave up: %+v", p.Status())
+	}
+
+	st := p.Status()
+	if st.State != StateFailed || st.Restarts != 2 || st.ExitCode != 1 || st.Error == "" {
+		t.Errorf("status = %+v, want failed after 2 restarts with exit 1", st)
+	}
+	// Backoff: 50ms before restart 1, 100ms before restart 2.
+	if elapsed := time.Since(start); elapsed < 150*time.Millisecond {
+		t.Errorf("gave up after %v; backoff was not applied", elapsed)
+	}
+}
+
+func TestRestartPolicies(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy config.RestartPolicy
+		mode   string
+		want   State
+	}{
+		{"never does not restart a crash", config.RestartNever, testutil.Crash, StateFailed},
+		{"on-failure leaves a clean exit stopped", config.RestartOnFailure, testutil.Exit0, StateStopped},
+		{"always restarts a clean exit", config.RestartAlways, testutil.Exit0, StateFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := spec(tt.mode, "")
+			s.Policy = tt.policy
+			s.MaxAttempts = 1
+			p := Start(s)
+			select {
+			case <-p.Done():
+			case <-time.After(timeout):
+				t.Fatalf("process never settled: %+v", p.Status())
+			}
+			st := p.Status()
+			if st.State != tt.want {
+				t.Errorf("state = %q, want %q", st.State, tt.want)
+			}
+			wantRestarts := 0
+			if tt.policy == config.RestartAlways {
+				wantRestarts = 1
+			}
+			if st.Restarts != wantRestarts {
+				t.Errorf("restarts = %d, want %d", st.Restarts, wantRestarts)
+			}
+		})
+	}
+}
+
+func TestStableRunResetsAttempts(t *testing.T) {
+	s := spec(testutil.Crash, "")
+	s.MaxAttempts = 1
+	s.StableAfter = time.Nanosecond // every run counts as stable
+	p := Start(s)
+	defer p.Stop()
+
+	if !testutil.WaitFor(timeout, func() bool { return p.Status().Restarts >= 3 }) {
+		t.Fatalf("expected restarts to continue past max_attempts, got %+v", p.Status())
+	}
+}
+
+func TestBackoffFor(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{1, time.Second},
+		{2, 2 * time.Second},
+		{3, 4 * time.Second},
+		{10, maxBackoff},
+	}
+	for _, tt := range tests {
+		if got := backoffFor(time.Second, tt.attempt); got != tt.want {
+			t.Errorf("backoffFor(1s, %d) = %v, want %v", tt.attempt, got, tt.want)
+		}
+	}
+}
+
+func TestManager(t *testing.T) {
+	m := NewManager()
+	a, b := spec(testutil.Sleep, ""), spec(testutil.Sleep, "")
+	a.Name, b.Name = "a", "b"
+	if err := m.Start([]Spec{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start([]Spec{a}); err == nil {
+		t.Error("expected duplicate name error")
+	}
+
+	if !testutil.WaitFor(timeout, func() bool {
+		for _, st := range m.Statuses() {
+			if st.State != StateRunning {
+				return false
+			}
+		}
+		return true
+	}) {
+		t.Fatalf("not all running: %+v", m.Statuses())
+	}
+
+	m.StopAll()
+	sts := m.Statuses()
+	if len(sts) != 2 || sts[0].Name != "a" || sts[1].Name != "b" {
+		t.Fatalf("statuses not in start order: %+v", sts)
+	}
+	for _, st := range sts {
+		if st.State != StateStopped {
+			t.Errorf("%s state = %q after StopAll", st.Name, st.State)
+		}
+	}
+}

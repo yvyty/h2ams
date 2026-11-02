@@ -1,0 +1,262 @@
+// Package process starts, stops, and supervises child processes.
+package process
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os/exec"
+	"sync"
+	"time"
+
+	"github.com/yvyty/h2ams/internal/config"
+)
+
+// State is the lifecycle state of a managed process.
+type State string
+
+const (
+	StateStarting   State = "starting"
+	StateRunning    State = "running"
+	StateRestarting State = "restarting"
+	StateStopped    State = "stopped"
+	StateFailed     State = "failed"
+)
+
+// Defaults for optional Spec fields.
+const (
+	DefaultStopTimeout = 5 * time.Second
+	DefaultStableAfter = 10 * time.Second
+	maxBackoff         = 30 * time.Second
+)
+
+// Spec describes how to run and supervise one process.
+type Spec struct {
+	Name    string
+	Command string   // run through the platform shell
+	Dir     string   // working directory; empty means the current one
+	Env     []string // full environment; nil inherits the parent's
+
+	Policy      config.RestartPolicy
+	MaxAttempts int           // consecutive restarts before giving up
+	Backoff     time.Duration // delay before the first restart; doubles each time
+
+	// StableAfter resets the consecutive-restart count once a run lasts this long.
+	StableAfter time.Duration
+	// StopTimeout is how long Stop waits after a graceful signal before killing.
+	StopTimeout time.Duration
+
+	Stdout, Stderr io.Writer // nil discards output
+}
+
+// Status is a snapshot of a process, safe to serialize.
+type Status struct {
+	Name      string    `json:"name"`
+	State     State     `json:"state"`
+	PID       int       `json:"pid,omitempty"`
+	Restarts  int       `json:"restarts"`
+	ExitCode  int       `json:"exit_code,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	StartedAt time.Time `json:"started_at,omitzero"`
+}
+
+// Process supervises one command according to its Spec.
+type Process struct {
+	spec     Spec
+	stop     chan struct{}
+	stopOnce sync.Once
+	done     chan struct{}
+
+	mu     sync.Mutex
+	status Status
+}
+
+// Start launches the command and supervises it in the background.
+func Start(spec Spec) *Process {
+	if spec.StopTimeout <= 0 {
+		spec.StopTimeout = DefaultStopTimeout
+	}
+	if spec.StableAfter <= 0 {
+		spec.StableAfter = DefaultStableAfter
+	}
+	p := &Process{
+		spec:   spec,
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
+		status: Status{Name: spec.Name, State: StateStarting},
+	}
+	go p.supervise()
+	return p
+}
+
+// Stop terminates the process (if running), disables restarts, and waits.
+func (p *Process) Stop() {
+	p.stopOnce.Do(func() { close(p.stop) })
+	<-p.done
+}
+
+// Done is closed once the process is stopped or has failed for good.
+func (p *Process) Done() <-chan struct{} { return p.done }
+
+// Status returns a snapshot of the current state.
+func (p *Process) Status() Status {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status
+}
+
+func (p *Process) supervise() {
+	defer close(p.done)
+	attempts := 0
+	for {
+		started := time.Now()
+		exitErr, stopped := p.runOnce()
+		if stopped {
+			p.settle(StateStopped, nil)
+			return
+		}
+		if time.Since(started) >= p.spec.StableAfter {
+			attempts = 0
+		}
+
+		failed := exitErr != nil
+		if !p.shouldRestart(failed) {
+			if failed {
+				p.settle(StateFailed, exitErr)
+			} else {
+				p.settle(StateStopped, nil)
+			}
+			return
+		}
+		if attempts >= p.spec.MaxAttempts {
+			p.settle(StateFailed, fmt.Errorf("gave up after %d restarts: %w", attempts, lastErr(exitErr)))
+			return
+		}
+
+		attempts++
+		p.update(func(s *Status) {
+			s.State = StateRestarting
+			s.PID = 0
+			s.Restarts++
+		})
+		select {
+		case <-time.After(backoffFor(p.spec.Backoff, attempts)):
+		case <-p.stop:
+			p.settle(StateStopped, nil)
+			return
+		}
+	}
+}
+
+// runOnce runs the command until it exits or Stop is called.
+func (p *Process) runOnce() (exitErr error, stopped bool) {
+	cmd := newShellCommand(p.spec.Command)
+	cmd.Dir = p.spec.Dir
+	cmd.Env = p.spec.Env
+	cmd.Stdout = p.spec.Stdout
+	cmd.Stderr = p.spec.Stderr
+	cmd.WaitDelay = time.Second
+
+	if err := cmd.Start(); err != nil {
+		p.recordExit(-1, err)
+		return err, false
+	}
+	pid := cmd.Process.Pid
+	p.update(func(s *Status) {
+		s.State = StateRunning
+		s.PID = pid
+		s.Error = ""
+		s.ExitCode = 0
+		s.StartedAt = time.Now()
+	})
+
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
+	select {
+	case err := <-waitErr:
+		killGroup(pid) // reap anything the command left behind in its group
+		p.recordExit(exitCode(err), err)
+		return err, false
+	case <-p.stop:
+		p.terminate(pid, waitErr)
+		return nil, true
+	}
+}
+
+// terminate asks the process group to exit, then kills it after StopTimeout.
+func (p *Process) terminate(pid int, waitErr <-chan error) {
+	terminateGroup(pid)
+	select {
+	case <-waitErr:
+	case <-time.After(p.spec.StopTimeout):
+		killGroup(pid)
+		<-waitErr
+	}
+	killGroup(pid)
+}
+
+func (p *Process) shouldRestart(failed bool) bool {
+	switch p.spec.Policy {
+	case config.RestartAlways:
+		return true
+	case config.RestartOnFailure:
+		return failed
+	default:
+		return false
+	}
+}
+
+func (p *Process) recordExit(code int, err error) {
+	p.update(func(s *Status) {
+		s.ExitCode = code
+		if err != nil {
+			s.Error = err.Error()
+		} else {
+			s.Error = ""
+		}
+	})
+}
+
+func (p *Process) settle(state State, err error) {
+	p.update(func(s *Status) {
+		s.State = state
+		s.PID = 0
+		if err != nil {
+			s.Error = err.Error()
+		}
+	})
+}
+
+func (p *Process) update(fn func(*Status)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fn(&p.status)
+}
+
+// backoffFor returns the delay before restart number attempt (1-based).
+func backoffFor(base time.Duration, attempt int) time.Duration {
+	d := base
+	for i := 1; i < attempt && d < maxBackoff; i++ {
+		d *= 2
+	}
+	return min(d, maxBackoff)
+}
+
+func exitCode(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	if err != nil {
+		return -1
+	}
+	return 0
+}
+
+func lastErr(err error) error {
+	if err == nil {
+		return errors.New("process exited")
+	}
+	return err
+}
