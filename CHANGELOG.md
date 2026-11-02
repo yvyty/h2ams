@@ -7,6 +7,8 @@ All notable changes to h2ams. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-02
+
 ### Fixed
 - An app whose `cwd` doesn't exist (or isn't a directory) now fails at once
   with "working directory … does not exist (check cwd in h2ams.yml)",
@@ -62,5 +64,6 @@ The first release.
   programs can't be asked to close from outside); container apps get a
   `cmd.exe` command line.
 
-[Unreleased]: https://github.com/yvyty/h2ams/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/yvyty/h2ams/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/yvyty/h2ams/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yvyty/h2ams/releases/tag/v0.1.0
