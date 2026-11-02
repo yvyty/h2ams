@@ -5,7 +5,7 @@ All notable changes to h2ams. The format follows
 [Semantic Versioning](https://semver.org/) as described in the
 [README](README.md#versioning).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-02
 
 The first release.
 
