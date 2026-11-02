@@ -261,22 +261,31 @@ which environment is active. To switch, run `h2ams down` and then
   giving up. Alerts go to `daemon.log` and, if `notifications.crash_loop` is
   on, to a desktop notification (once per episode).
 - **State directory.** `~/Library/Caches/h2ams/<hash>/` on macOS,
-  `~/.cache/h2ams/<hash>/` on Linux. Override the base with `H2AMS_STATE_DIR`.
+  `~/.cache/h2ams/<hash>/` on Linux, `%LocalAppData%\h2ams\<hash>\` on
+  Windows. Override the base with `H2AMS_STATE_DIR`.
   It holds the socket, `daemon.log` (the daemon's own messages), `logs/`, and
   `project.json` (which config it belongs to, used by `h2ams-tray`).
 
 ## Platform support
 
+Every push runs the test suite on macOS, Linux, and Windows (see the CI badge
+above).
+
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| Start, stop, restart | ✅ | ✅ | best-effort (`taskkill`), untested |
+| Start, stop, restart | ✅ | ✅ | ✅ (Windows 10 1803+); stop is immediate, see below |
 | Port detection | ✅ via `lsof` | ✅ via `/proc` | not yet |
 | CPU and memory | ✅ via `ps` | ✅ via `/proc` | not yet |
 | Desktop notifications | ✅ via `osascript` | ✅ via `notify-send` (libnotify) | not yet |
 | Dashboard and API | ✅ | ✅ | ✅ |
-| Docker apps | ✅ | ✅ | best-effort, untested |
-| `h2ams-tray` | ✅ (cgo build) | ✅ (StatusNotifierItem desktops) | ✅, manual check |
+| Docker apps | ✅ | ✅ | builds the `cmd.exe` command line; not run against Docker in CI |
+| `h2ams-tray` | ✅ (cgo build) | ✅ (StatusNotifierItem desktops) | ✅ starts in CI; menu checked by hand |
 | Apps die if the daemon is killed with `SIGKILL` | ❌ (stop with `h2ams down`) | ✅ | ❌ |
+
+On Windows, apps run through `cmd.exe`, and stopping one kills its process
+tree at once: Windows has no way to ask a console program to shut down
+gracefully from outside (`taskkill` without `/F` only works for windowed
+programs, which do get a polite close first).
 
 ## Troubleshooting
 
