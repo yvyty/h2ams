@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -68,7 +67,8 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer closeAll(logFiles)
-	specs := Specs(cfg, filepath.Dir(configPath), names, func(app string) io.Writer { return logFiles[app] })
+	project := filepath.Base(opts.Paths.Dir)
+	specs := Specs(cfg, filepath.Dir(configPath), project, names, func(app string) io.Writer { return logFiles[app] })
 
 	mgr := process.NewManager()
 	if err := mgr.Start(specs); err != nil {
@@ -90,26 +90,13 @@ func Run(ctx context.Context, opts Options) error {
 		info: Response{
 			PID:         os.Getpid(),
 			ConfigPath:  configPath,
+			Socket:      opts.Paths.Socket,
 			Environment: cfg.ResolveEnvironment(opts.Environment),
 		},
+		containers: dockerApps(cfg, project, names),
 	}
 
 	var wg sync.WaitGroup
-	if cfg.Dashboard.IsEnabled() {
-		addr := opts.DashboardAddr
-		if addr == "" {
-			addr = fmt.Sprintf("127.0.0.1:%d", cfg.Dashboard.Port)
-		}
-		url, err := startDashboard(ctx, &wg, svc, addr)
-		if err != nil {
-			// Another project's daemon may hold the port; keep supervising.
-			logf("dashboard disabled: %v (set dashboard.port in the config)", err)
-		} else {
-			svc.info.Dashboard = url
-			logf("dashboard listening on %s", url)
-		}
-	}
-
 	var notifier notify.Notifier
 	if cfg.Notifications.CrashLoop {
 		notifier = opts.Notifier
@@ -123,12 +110,28 @@ func Run(ctx context.Context, opts Options) error {
 		svc.monitor(ctx, notifier, logf)
 	}()
 
-	s := &server{svc: svc, cancel: cancel}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		s.serve(ln, &wg)
-	}()
+	a := &api{base: ctx, svc: svc, shutdown: cancel}
+	if cfg.Dashboard.IsEnabled() {
+		addr := opts.DashboardAddr
+		if addr == "" {
+			addr = fmt.Sprintf("127.0.0.1:%d", cfg.Dashboard.Port)
+		}
+		url, err := startDashboard(ctx, &wg, a, addr)
+		if err != nil {
+			// Another project's daemon may hold the port; keep supervising.
+			logf("dashboard disabled: %v (set dashboard.port in the config)", err)
+		} else {
+			svc.info.Dashboard = url
+			logf("dashboard listening on %s", url)
+		}
+	}
+
+	// Serve the socket last: once it answers, svc.info is final, and
+	// "h2ams up" treats a reachable socket as "ready".
+	if err := writeProject(opts.Paths, configPath); err != nil {
+		logf("recording project for h2ams-tray failed: %v", err)
+	}
+	serveHTTP(ctx, &wg, ln, a.socketHandler())
 
 	<-ctx.Done()
 	ln.Close()
@@ -159,9 +162,10 @@ func closeAll(files map[string]*os.File) {
 }
 
 // Specs turns config apps into process specs. Relative cwds resolve against
-// baseDir (the config file's directory). output returns where each app's
-// stdout, stderr, and lifecycle events go; nil discards them.
-func Specs(cfg *config.Config, baseDir string, names []string, output func(app string) io.Writer) []process.Spec {
+// baseDir (the config file's directory). project names Docker containers.
+// output returns where each app's stdout, stderr, and lifecycle events go;
+// nil discards them.
+func Specs(cfg *config.Config, baseDir, project string, names []string, output func(app string) io.Writer) []process.Spec {
 	specs := make([]process.Spec, 0, len(names))
 	for _, name := range names {
 		app := cfg.Apps[name]
@@ -173,7 +177,7 @@ func Specs(cfg *config.Config, baseDir string, names []string, output func(app s
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(baseDir, dir)
 		}
-		specs = append(specs, process.Spec{
+		spec := process.Spec{
 			Name:        name,
 			Command:     app.Command,
 			Dir:         dir,
@@ -184,7 +188,14 @@ func Specs(cfg *config.Config, baseDir string, names []string, output func(app s
 			Stdout:      out,
 			Stderr:      out,
 			Events:      out,
-		})
+		}
+		if app.Docker != nil {
+			container := containerName(project, name)
+			spec.Command = dockerRunCommand(project, container, dir, app)
+			spec.Env = os.Environ() // app env goes into the container via -e
+			spec.Cleanup = func() { removeContainer(container) }
+		}
+		specs = append(specs, spec)
 	}
 	return specs
 }
@@ -220,61 +231,4 @@ func listen(socket string) (net.Listener, error) {
 		return nil, fmt.Errorf("listening on %s: %w", socket, err)
 	}
 	return ln, nil
-}
-
-// server answers CLI requests on the Unix socket.
-type server struct {
-	svc      *service
-	cancel   context.CancelFunc
-	downOnce sync.Once
-}
-
-func (s *server) serve(ln net.Listener, wg *sync.WaitGroup) {
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return // listener closed
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.handle(conn)
-		}()
-	}
-}
-
-func (s *server) handle(conn net.Conn) {
-	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	var req Request
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
-		resp := s.svc.info
-		resp.Error = "invalid request: " + err.Error()
-		_ = json.NewEncoder(conn).Encode(resp)
-		return
-	}
-	_ = json.NewEncoder(conn).Encode(s.reply(req))
-}
-
-func (s *server) reply(req Request) Response {
-	switch req.Cmd {
-	case CmdStatus:
-		return s.svc.status()
-	case CmdDown:
-		s.downOnce.Do(s.svc.mgr.StopAll)
-		defer s.cancel() // shut down after the reply is built
-		return s.svc.status()
-	case CmdStart, CmdStop, CmdRestart:
-		err := s.svc.act(req.Cmd, req.App)
-		resp := s.svc.status()
-		if err != nil {
-			resp.Error = err.Error()
-		}
-		return resp
-	default:
-		resp := s.svc.info
-		resp.Error = fmt.Sprintf("unknown command %q", req.Cmd)
-		return resp
-	}
 }

@@ -238,6 +238,24 @@ func TestEventsAreLogged(t *testing.T) {
 	}
 }
 
+func TestCleanupRunsAroundEachRun(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	s := spec(testutil.CrashOnce, filepath.Join(t.TempDir(), "marker"))
+	s.Cleanup = func() { mu.Lock(); calls++; mu.Unlock() }
+	p := Start(s)
+	if !testutil.WaitFor(timeout, func() bool { st := p.Status(); return st.State == StateRunning && st.Restarts == 1 }) {
+		t.Fatalf("never restarted: %+v", p.Status())
+	}
+	p.Stop()
+	mu.Lock()
+	defer mu.Unlock()
+	// Two runs (crash, then stopped), each with a cleanup before and after.
+	if calls != 4 {
+		t.Errorf("cleanup ran %d times, want 4", calls)
+	}
+}
+
 func TestBackoffFor(t *testing.T) {
 	tests := []struct {
 		attempt int

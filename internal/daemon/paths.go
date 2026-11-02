@@ -28,16 +28,24 @@ func PathsFor(configPath string) (Paths, error) {
 	if err != nil {
 		return Paths{}, err
 	}
-	base := os.Getenv(StateDirEnv)
-	if base == "" {
-		cache, err := os.UserCacheDir()
-		if err != nil {
-			return Paths{}, fmt.Errorf("locating state directory: %w", err)
-		}
-		base = filepath.Join(cache, "h2ams")
+	base, err := stateBase()
+	if err != nil {
+		return Paths{}, err
 	}
 	sum := sha256.Sum256([]byte(abs))
 	return NewPaths(filepath.Join(base, hex.EncodeToString(sum[:6]))), nil
+}
+
+// stateBase is the directory holding one state directory per project.
+func stateBase() (string, error) {
+	if base := os.Getenv(StateDirEnv); base != "" {
+		return base, nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("locating state directory: %w", err)
+	}
+	return filepath.Join(cache, "h2ams"), nil
 }
 
 // NewPaths returns the standard file layout inside dir.

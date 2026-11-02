@@ -318,8 +318,8 @@ func TestUnknownCommand(t *testing.T) {
 		<-errCh
 	}()
 
-	if _, err := Call(opts.Paths.Socket, Request{Cmd: "dance"}, timeout); err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Errorf("err = %v, want unknown command", err)
+	if _, err := Call(opts.Paths.Socket, Request{Cmd: "dance"}, timeout); err == nil || !strings.Contains(err.Error(), "no endpoint POST /api/v1/dance") {
+		t.Errorf("err = %v, want no endpoint", err)
 	}
 }
 
@@ -340,7 +340,7 @@ apps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs := Specs(cfg, "/base", []string{"rel", "abs", "none"}, nil)
+	specs := Specs(cfg, "/base", "proj", []string{"rel", "abs", "none"}, nil)
 	wantDirs := []string{"/base/sub", "/tmp", "/base"}
 	for i, s := range specs {
 		if s.Dir != wantDirs[i] {

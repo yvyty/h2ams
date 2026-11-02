@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +19,8 @@ import (
 const downTimeout = time.Minute
 
 func newStatusCmd(opts *rootOptions) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the state of every managed app",
 		Long: `Show the active environment, the dashboard URL, and each app's state, PID,
@@ -34,7 +36,7 @@ States:
 CPU is percent of one core and MEM is resident memory, both summed over the
 app and every process it started, sampled every 2 seconds. DETAIL shows the
 last exit error. Ports, CPU, and MEM are measured on macOS and Linux.`,
-		Example: "  h2ams status\n  h2ams status --config path/to/h2ams.yml",
+		Example: "  h2ams status\n  h2ams status --json\n  h2ams status --config path/to/h2ams.yml",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, paths, err := opts.resolve()
@@ -43,16 +45,26 @@ last exit error. Ports, CPU, and MEM are measured on macOS and Linux.`,
 			}
 			resp, err := daemon.Call(paths.Socket, daemon.Request{Cmd: daemon.CmdStatus}, 5*time.Second)
 			if errors.Is(err, daemon.ErrNotRunning) {
+				if asJSON {
+					return err // scripts get a non-zero exit, not prose on stdout
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), daemon.ErrNotRunning)
 				return nil
 			}
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(resp)
+			}
 			printStatus(cmd.OutOrStdout(), resp)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the API's status JSON (see docs/api.md)")
+	return cmd
 }
 
 func newDownCmd(opts *rootOptions) *cobra.Command {
@@ -104,6 +116,13 @@ func printStatus(w io.Writer, resp daemon.Response) {
 			uptime = time.Since(app.StartedAt).Round(time.Second).String()
 		}
 		detail := app.Error
+		if detail == "" && app.Container != nil {
+			state := app.Container.State
+			if state == "" {
+				state = "absent"
+			}
+			detail = fmt.Sprintf("container %s (%s)", state, app.Container.Image)
+		}
 		if detail == "" {
 			detail = "-"
 		}

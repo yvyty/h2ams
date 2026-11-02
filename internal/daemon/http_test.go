@@ -71,7 +71,7 @@ func (w *syncWriter) String() string {
 
 func getStatus(t *testing.T, baseURL string) Response {
 	t.Helper()
-	res, err := http.Get(baseURL + "/api/status")
+	res, err := http.Get(baseURL + "/api/v1/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestDashboardActions(t *testing.T) {
 	base, sock, _ := dashboardDaemon(t, "version: 1\napps:\n  api:\n    command: "+fmt.Sprintf("%q", testutil.Command(testutil.Sleep, ""))+"\n")
 	pid := waitHTTPState(t, base, "api", process.StateRunning).PID
 
-	code, resp := post(t, base+"/api/apps/api/restart", nil)
+	code, resp := post(t, base+"/api/v1/apps/api/restart", nil)
 	if code != http.StatusOK || resp.Error != "" {
 		t.Fatalf("restart: %d %+v", code, resp)
 	}
@@ -188,7 +188,7 @@ func TestDashboardActions(t *testing.T) {
 		t.Errorf("restart kept pid %d", pid)
 	}
 
-	if code, resp = post(t, base+"/api/apps/api/stop", nil); code != http.StatusOK {
+	if code, resp = post(t, base+"/api/v1/apps/api/stop", nil); code != http.StatusOK {
 		t.Fatalf("stop: %d %+v", code, resp)
 	}
 	if api, _ := appByName(resp, "api"); api.State != process.StateStopped {
@@ -197,20 +197,20 @@ func TestDashboardActions(t *testing.T) {
 	// The CLI sees the same state: both go through one service.
 	waitAppState(t, sock, "api", process.StateStopped)
 
-	if code, _ = post(t, base+"/api/apps/api/stop", nil); code != http.StatusConflict {
+	if code, _ = post(t, base+"/api/v1/apps/api/stop", nil); code != http.StatusConflict {
 		t.Errorf("stop of stopped app: %d, want 409", code)
 	}
-	if code, _ = post(t, base+"/api/apps/api/start", nil); code != http.StatusOK {
+	if code, _ = post(t, base+"/api/v1/apps/api/start", nil); code != http.StatusOK {
 		t.Errorf("start: %d", code)
 	}
 	waitHTTPState(t, base, "api", process.StateRunning)
-	if code, _ = post(t, base+"/api/apps/api/start", nil); code != http.StatusConflict {
+	if code, _ = post(t, base+"/api/v1/apps/api/start", nil); code != http.StatusConflict {
 		t.Errorf("start of running app: %d, want 409", code)
 	}
-	if code, _ = post(t, base+"/api/apps/ghost/restart", nil); code != http.StatusNotFound {
+	if code, _ = post(t, base+"/api/v1/apps/ghost/restart", nil); code != http.StatusNotFound {
 		t.Errorf("unknown app: %d, want 404", code)
 	}
-	if code, _ = post(t, base+"/api/apps/api/explode", nil); code != http.StatusNotFound {
+	if code, _ = post(t, base+"/api/v1/apps/api/explode", nil); code != http.StatusNotFound {
 		t.Errorf("unknown action: %d, want 404", code)
 	}
 }
@@ -220,7 +220,7 @@ func TestDashboardRejectsOtherSites(t *testing.T) {
 	waitHTTPState(t, base, "api", process.StateRunning)
 
 	// DNS rebinding: a hostile name that resolves to 127.0.0.1.
-	req, _ := http.NewRequest(http.MethodGet, base+"/api/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, base+"/api/v1/status", nil)
 	req.Host = "evil.example:" + strings.TrimPrefix(base, "http://127.0.0.1:")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -232,7 +232,7 @@ func TestDashboardRejectsOtherSites(t *testing.T) {
 	}
 
 	// Cross-site POST from a page the user has open.
-	code, _ := post(t, base+"/api/apps/api/stop", http.Header{"Origin": {"https://evil.example"}})
+	code, _ := post(t, base+"/api/v1/apps/api/stop", http.Header{"Origin": {"https://evil.example"}})
 	if code != http.StatusForbidden {
 		t.Errorf("cross-site POST: %d, want 403", code)
 	}
@@ -241,7 +241,7 @@ func TestDashboardRejectsOtherSites(t *testing.T) {
 	}
 
 	// Same-origin POST (what the dashboard sends) is allowed.
-	code, _ = post(t, base+"/api/apps/api/restart", http.Header{"Origin": {base}})
+	code, _ = post(t, base+"/api/v1/apps/api/restart", http.Header{"Origin": {base}})
 	if code != http.StatusOK {
 		t.Errorf("same-origin POST: %d, want 200", code)
 	}
@@ -249,7 +249,7 @@ func TestDashboardRejectsOtherSites(t *testing.T) {
 	// Cross-site WebSocket.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/api/apps/api/logs"
+	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/api/v1/apps/api/logs/ws"
 	if conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {"https://evil.example"}}}); err == nil {
 		conn.CloseNow()
 		t.Error("cross-site WebSocket was accepted")
@@ -290,7 +290,7 @@ apps:
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*timeout)
 	defer cancel()
-	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/api/apps/api/logs?lines=50"
+	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/api/v1/apps/api/logs/ws?lines=50"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -303,7 +303,7 @@ apps:
 		t.Fatalf("existing output not streamed: %q", got.String())
 	}
 
-	if code, _ := post(t, base+"/api/apps/api/restart", nil); code != http.StatusOK {
+	if code, _ := post(t, base+"/api/v1/apps/api/restart", nil); code != http.StatusOK {
 		t.Fatalf("restart: %d", code)
 	}
 	if !testutil.WaitFor(timeout, func() bool {
@@ -319,8 +319,8 @@ func TestDashboardLogStreamErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	for path, want := range map[string]int{
-		"/api/apps/ghost/logs":         http.StatusNotFound,
-		"/api/apps/api/logs?lines=abc": http.StatusBadRequest,
+		"/api/v1/apps/ghost/logs/ws":         http.StatusNotFound,
+		"/api/v1/apps/api/logs/ws?lines=abc": http.StatusBadRequest,
 	} {
 		_, res, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(base, "http")+path, nil)
 		if err == nil || res == nil || res.StatusCode != want {

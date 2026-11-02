@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -115,9 +116,10 @@ func TestPrintStatus(t *testing.T) {
 	printStatus(&b, daemon.Response{Environment: "dev", Dashboard: "http://127.0.0.1:9999", Apps: []daemon.AppStatus{
 		{Status: process.Status{Name: "api", State: process.StateRunning, PID: 42, StartedAt: time.Now().Add(-3 * time.Second)}, Ports: []int{8080, 8443}, CPUPercent: ptr(12.34), MemoryBytes: 52 << 20},
 		{Status: process.Status{Name: "web", State: process.StateFailed, Restarts: 5, Error: "gave up"}},
+		{Status: process.Status{Name: "db", State: process.StateRunning, PID: 7}, Ports: []int{5432}, Container: &daemon.ContainerInfo{Name: "h2ams-x-db", Image: "postgres:16", State: "running"}},
 	}})
 	out := b.String()
-	for _, want := range []string{"Environment: dev", "Dashboard:   http://127.0.0.1:9999", "APP", "PORTS", "CPU", "MEM", "12.3%", "52.0 MiB", "api", "running", "42", "8080,8443", "3s", "web", "failed", "gave up"} {
+	for _, want := range []string{"Environment: dev", "Dashboard:   http://127.0.0.1:9999", "APP", "PORTS", "CPU", "MEM", "12.3%", "52.0 MiB", "api", "running", "42", "8080,8443", "3s", "web", "failed", "gave up", "container running (postgres:16)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -194,6 +196,11 @@ func TestBinaryUpStatusDown(t *testing.T) {
 
 	if out := h2ams("logs", "sleeper"); !strings.Contains(out, "hello-from-app") || !strings.Contains(out, "sleeper: started") {
 		t.Fatalf("logs output:\n%s", out)
+	}
+
+	var st daemon.Response
+	if err := json.Unmarshal([]byte(h2ams("status", "--json")), &st); err != nil || st.APIVersion != "v1" || st.Socket == "" || len(st.Apps) != 1 {
+		t.Fatalf("status --json: %+v %v", st, err)
 	}
 
 	if out := h2ams("restart", "sleeper"); !strings.Contains(out, "sleeper") {

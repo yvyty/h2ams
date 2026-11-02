@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,10 +73,37 @@ type Environment struct {
 
 // App describes one managed application.
 type App struct {
-	Command string            `yaml:"command"`
+	Command string            `yaml:"command,omitempty"` // set exactly one of Command and Docker
+	Docker  *Docker           `yaml:"docker,omitempty"`
 	Cwd     string            `yaml:"cwd,omitempty"`
-	Env     map[string]string `yaml:"env,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"` // for Docker apps, passed into the container
 	Restart Restart           `yaml:"restart,omitempty"`
+}
+
+// Docker runs an app as a container through the docker CLI.
+type Docker struct {
+	Image   string   `yaml:"image"`
+	Ports   []string `yaml:"ports,omitempty"`   // "[ip:]host:container[/proto]", e.g. "8080:80"
+	Volumes []string `yaml:"volumes,omitempty"` // "host:container[:opts]"; ./relative hosts resolve against cwd
+	Args    []string `yaml:"args,omitempty"`    // passed after the image
+}
+
+// PublishedPort returns the host port of a docker port mapping such as
+// "8080:80", "127.0.0.1:5432:5432", or "53:53/udp".
+func PublishedPort(mapping string) (int, error) {
+	spec, _, _ := strings.Cut(mapping, "/")
+	parts := strings.Split(spec, ":")
+	if len(parts) < 2 {
+		return 0, fmt.Errorf("%q: want host:container, e.g. \"8080:80\"", mapping)
+	}
+	hostPort, ctrPort := parts[len(parts)-2], parts[len(parts)-1]
+	for _, p := range []string{hostPort, ctrPort} {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return 0, fmt.Errorf("%q: %q is not a port number", mapping, p)
+		}
+	}
+	port, _ := strconv.Atoi(hostPort)
+	return port, nil
 }
 
 // Restart holds an app's restart behavior.
@@ -186,8 +214,26 @@ func (c *Config) Validate() error {
 		if !validName.MatchString(name) {
 			add("apps.%s: name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'", name)
 		}
-		if strings.TrimSpace(app.Command) == "" {
-			add("apps.%s.command: required", name)
+		hasCommand := strings.TrimSpace(app.Command) != ""
+		switch {
+		case hasCommand && app.Docker != nil:
+			add("apps.%s: set either command or docker, not both", name)
+		case !hasCommand && app.Docker == nil:
+			add("apps.%s.command: required (or docker for a container app)", name)
+		case app.Docker != nil:
+			if strings.TrimSpace(app.Docker.Image) == "" {
+				add("apps.%s.docker.image: required", name)
+			}
+			for _, p := range app.Docker.Ports {
+				if _, err := PublishedPort(p); err != nil {
+					add("apps.%s.docker.ports: %v", name, err)
+				}
+			}
+			for _, v := range app.Docker.Volumes {
+				if host, ctr, ok := strings.Cut(v, ":"); !ok || host == "" || ctr == "" {
+					add("apps.%s.docker.volumes: %q: want host:container", name, v)
+				}
+			}
 		}
 		switch app.Restart.Policy {
 		case RestartAlways, RestartOnFailure, RestartNever:

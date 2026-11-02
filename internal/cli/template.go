@@ -29,6 +29,15 @@ apps:
     restart:
       policy: always
 
+# A container app: set docker instead of command.
+#  db:
+#    docker:
+#      image: postgres:16
+#      ports: ["5432:5432"]
+#      volumes: ["./data:/var/lib/postgresql/data"]
+#    env:
+#      POSTGRES_PASSWORD: dev
+
 # Web dashboard on http://127.0.0.1:9999 (status, actions, live logs).
 # dashboard:
 #   enabled: true

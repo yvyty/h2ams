@@ -29,6 +29,10 @@ worker  running  14956  -      0.9%  3.1 MiB   0         3m12s   -
   memory, streams logs live, and has start/stop/restart buttons.
 - **Know when something is stuck.** Optional desktop notifications when an app
   is crash-looping.
+- **Containers too.** Run a database or queue from a Docker image right next
+  to your native apps, with the same restarts, logs, and controls.
+- **Scriptable.** A versioned local HTTP API ([docs/api.md](docs/api.md)) for
+  plugins and scripts, and a menu-bar app, [h2ams-tray](docs/tray.md).
 
 ## Install
 
@@ -103,9 +107,13 @@ notifications:
 | `default_environment` | no | all apps | Environment `h2ams up` starts when `--env` is not given. |
 | `environments.<name>.apps` | no | | List of app names started together. |
 | `apps.<name>` | yes (at least one) | | One managed app. Names may use letters, digits, `.`, `_`, and `-`. |
-| `apps.<name>.command` | yes | | Command line, run through `/bin/sh -c` (`cmd /C` on Windows). |
+| `apps.<name>.command` | one of `command` / `docker` | | Command line, run through `/bin/sh -c` (`cmd /C` on Windows). |
+| `apps.<name>.docker.image` | with `docker` | | Image to run, e.g. `postgres:16`. See [Docker apps](#docker-apps). |
+| `apps.<name>.docker.ports` | no | | Published ports, `[ip:]host:container[/proto]`, e.g. `"5432:5432"`. |
+| `apps.<name>.docker.volumes` | no | | `host:container[:opts]`. Host paths starting with `./`, `../`, or `~/` are resolved; others are named volumes. |
+| `apps.<name>.docker.args` | no | | Arguments after the image (the container's command). |
 | `apps.<name>.cwd` | no | config file's directory | Working directory. Relative paths are resolved from the config file. |
-| `apps.<name>.env` | no | | Extra environment variables, added to the daemon's environment. |
+| `apps.<name>.env` | no | | Extra environment variables, added to the daemon's environment. For Docker apps, passed into the container. |
 | `apps.<name>.restart.policy` | no | `on-failure` | `always`, `on-failure` (non-zero exit only), or `never`. |
 | `apps.<name>.restart.max_attempts` | no | `5` | Restarts in a row before the app is marked `failed`. The count resets once a run lasts 10s. |
 | `apps.<name>.restart.backoff` | no | `1s` | Delay before the first restart; doubles each time, up to 30s. Go duration syntax (`500ms`, `2s`). |
@@ -128,7 +136,7 @@ Error: h2ams.yml: invalid config:
 | --- | --- |
 | `h2ams init [--force]` | Write a template config. Refuses to overwrite an existing file without `--force`. |
 | `h2ams up [--env NAME]` | Validate the config, start the daemon in the background, and launch the environment's apps. |
-| `h2ams status` | Show the environment, dashboard URL, and each app's state, PID, ports, CPU, memory, restarts, uptime, and last error. |
+| `h2ams status [--json]` | Show the environment, dashboard URL, and each app's state, PID, ports, CPU, memory, restarts, uptime, and last error. `--json` prints the API's status object. |
 | `h2ams logs <app> [-n N] [-f]` | Show the last N lines (default 100, `0` for all) of an app's output; `-f` follows new output. |
 | `h2ams start <app>` | Start a stopped or failed app. |
 | `h2ams stop <app>` | Stop one app and keep it stopped; everything else keeps running. |
@@ -164,6 +172,57 @@ the port is taken (for example by another project's daemon), the daemon keeps
 running without a dashboard and logs a warning to `daemon.log`; set
 `dashboard.port` to fix it. JSON is available at `/api/status`.
 
+## Docker apps
+
+Give an app a `docker` block instead of a `command` to run it as a
+container:
+
+```yaml
+apps:
+  db:
+    docker:
+      image: postgres:16
+      ports: ["127.0.0.1:5432:5432"]
+      volumes: ["./data:/var/lib/postgresql/data"]
+    env:
+      POSTGRES_PASSWORD: dev
+```
+
+h2ams runs `docker run --rm --name h2ams-<project>-<app> ...` in the
+foreground as the supervised process, so restart policies, `logs`, `start`,
+`stop`, and `restart` work exactly as for native apps. Stopping sends
+`SIGTERM`, which the docker CLI forwards to the container. Any leftover
+container with the same name is removed (`docker rm -f`) before each start
+and after each exit. `status` shows the container's state (from
+`docker inspect`) and its published ports. CPU and memory aren't shown for
+containers.
+
+It needs the `docker` CLI on `PATH` and a running Docker daemon (Docker
+Desktop, Colima, OrbStack, or Docker Engine). Set `H2AMS_DOCKER` to use a
+different binary, such as `podman`.
+
+## API and plugins
+
+Each daemon serves a versioned HTTP API, `/api/v1`, on its Unix socket and on
+the dashboard port: status, start, stop, restart, logs (plain text or
+streamed), and down. The CLI, dashboard, and tray all use it.
+
+```sh
+SOCK=$(h2ams status --json | jq -r .socket)
+curl --unix-socket "$SOCK" http://h2ams/api/v1/status
+curl --unix-socket "$SOCK" -X POST http://h2ams/api/v1/apps/api/restart
+curl --unix-socket "$SOCK" -N "http://h2ams/api/v1/apps/api/logs?follow=true"
+```
+
+See [docs/api.md](docs/api.md) for every endpoint, the versioning policy,
+and a plugin example.
+
+## Menu-bar app
+
+`h2ams-tray` shows a colored dot (grey, green, amber, red) for all your
+projects and a menu to start, stop, and switch environments. It is a
+separate binary; see [docs/tray.md](docs/tray.md).
+
 ## Environments
 
 An environment is a named list of apps. `h2ams up --env testing` starts only
@@ -176,7 +235,8 @@ which environment is active. To switch, run `h2ams down` and then
 
 - **One daemon per config file.** `h2ams up` starts `h2ams daemon` detached
   from your terminal. Commands find it through a Unix socket keyed by the
-  config file's absolute path, so separate projects never collide.
+  config file's absolute path, so separate projects never collide. The CLI
+  talks to it over the same HTTP API that plugins use.
 - **Process groups.** Each app runs in its own process group. Stopping an app
   sends `SIGTERM` to the whole group (so `npm run dev` takes its children with
   it), then `SIGKILL` after 5 seconds.
@@ -191,7 +251,8 @@ which environment is active. To switch, run `h2ams down` and then
   on, to a desktop notification (once per episode).
 - **State directory.** `~/Library/Caches/h2ams/<hash>/` on macOS,
   `~/.cache/h2ams/<hash>/` on Linux. Override the base with `H2AMS_STATE_DIR`.
-  It holds the socket, `daemon.log` (the daemon's own messages), and `logs/`.
+  It holds the socket, `daemon.log` (the daemon's own messages), `logs/`, and
+  `project.json` (which config it belongs to, used by `h2ams-tray`).
 
 ## Platform support
 
@@ -201,7 +262,9 @@ which environment is active. To switch, run `h2ams down` and then
 | Port detection | ✅ via `lsof` | ✅ via `/proc` | not yet |
 | CPU and memory | ✅ via `ps` | ✅ via `/proc` | not yet |
 | Desktop notifications | ✅ via `osascript` | ✅ via `notify-send` (libnotify) | not yet |
-| Dashboard | ✅ | ✅ | ✅ |
+| Dashboard and API | ✅ | ✅ | ✅ |
+| Docker apps | ✅ | ✅ | best-effort, untested |
+| `h2ams-tray` | ✅ (cgo build) | ✅ (StatusNotifierItem desktops) | ✅, manual check |
 | Apps die if the daemon is killed with `SIGKILL` | ❌ (stop with `h2ams down`) | ✅ | ❌ |
 
 ## Troubleshooting
@@ -229,10 +292,13 @@ which environment is active. To switch, run `h2ams down` and then
 ## Development
 
 ```sh
-go test ./...          # unit and integration tests (builds the binary once)
-go test -short ./...   # skip the binary end-to-end test
+go test ./...                        # unit and integration tests (builds the binary)
+go test -short ./...                 # skip the tests that build binaries
+H2AMS_TEST_DOCKER=1 go test ./...    # also run a real container (needs Docker)
 go vet ./...
 ```
+
+Docker tests use a fake `docker` script by default, so they need no Docker.
 
 Set the version at build time with
 `-ldflags "-X github.com/yvyty/h2ams/internal/cli.Version=v0.1.0"`.

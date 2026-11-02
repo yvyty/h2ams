@@ -66,6 +66,10 @@ func TestParseErrors(t *testing.T) {
 		{"missing version", "apps:\n  a:\n    command: x\n", []string{"version: must be 1"}},
 		{"no apps", "version: 1\n", []string{"apps: at least one app"}},
 		{"missing command", "version: 1\napps:\n  a:\n    cwd: .\n", []string{"apps.a.command: required"}},
+		{"command and docker", "version: 1\napps:\n  a:\n    command: x\n    docker:\n      image: nginx\n", []string{"apps.a: set either command or docker, not both"}},
+		{"docker without image", "version: 1\napps:\n  a:\n    docker:\n      ports: [\"80:80\"]\n", []string{"apps.a.docker.image: required"}},
+		{"bad docker port", "version: 1\napps:\n  a:\n    docker:\n      image: nginx\n      ports: [\"80\", \"x:80\"]\n", []string{`apps.a.docker.ports: "80": want host:container`, `apps.a.docker.ports: "x:80": "x" is not a port number`}},
+		{"bad docker volume", "version: 1\napps:\n  a:\n    docker:\n      image: nginx\n      volumes: [\"/data\"]\n", []string{`apps.a.docker.volumes: "/data": want host:container`}},
 		{
 			"invalid restart policy",
 			"version: 1\napps:\n  a:\n    command: x\n    restart:\n      policy: sometimes\n",
@@ -148,6 +152,40 @@ func TestDashboardAndNotifications(t *testing.T) {
 	}
 }
 
+func TestDockerApp(t *testing.T) {
+	cfg, err := Parse([]byte(`version: 1
+apps:
+  db:
+    docker:
+      image: postgres:16
+      ports: ["127.0.0.1:5432:5432", "8080:80/tcp"]
+      volumes: ["./data:/var/lib/postgresql/data"]
+      args: ["-c", "log_statement=all"]
+    env:
+      POSTGRES_PASSWORD: dev
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := cfg.Apps["db"].Docker
+	if d == nil || d.Image != "postgres:16" || len(d.Ports) != 2 || len(d.Args) != 2 {
+		t.Fatalf("docker parsed wrong: %+v", d)
+	}
+}
+
+func TestPublishedPort(t *testing.T) {
+	for in, want := range map[string]int{"8080:80": 8080, "127.0.0.1:5432:5432": 5432, "53:53/udp": 53} {
+		if got, err := PublishedPort(in); err != nil || got != want {
+			t.Errorf("PublishedPort(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"80", "0:80", "70000:80", "a:b"} {
+		if _, err := PublishedPort(bad); err == nil {
+			t.Errorf("PublishedPort(%q) accepted", bad)
+		}
+	}
+}
+
 func TestResolveEnvironment(t *testing.T) {
 	cfg, _ := Parse([]byte(validYAML))
 	if got := cfg.ResolveEnvironment(""); got != "dev" {
@@ -165,7 +203,7 @@ func TestExampleConfig(t *testing.T) {
 		t.Fatalf("examples/%s: %v", DefaultFileName, err)
 	}
 	apps, err := cfg.AppsFor("backend")
-	if err != nil || strings.Join(apps, ",") != "api,worker" {
+	if err != nil || strings.Join(apps, ",") != "db,api,worker" {
 		t.Errorf("backend apps = %v, %v", apps, err)
 	}
 }

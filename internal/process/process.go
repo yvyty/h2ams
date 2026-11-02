@@ -50,6 +50,10 @@ type Spec struct {
 	// Events receives one timestamped line per lifecycle change (start, exit,
 	// restart, stop). Usually the same writer as Stdout; nil disables them.
 	Events io.Writer
+
+	// Cleanup, if set, runs before every start and after every exit (crash
+	// or stop). Docker apps use it to remove a leftover container.
+	Cleanup func()
 }
 
 // Status is a snapshot of a process, safe to serialize.
@@ -160,6 +164,10 @@ func (p *Process) supervise() {
 
 // runOnce runs the command until it exits or Stop is called.
 func (p *Process) runOnce() (exitErr error, stopped bool) {
+	if p.spec.Cleanup != nil {
+		p.spec.Cleanup()
+		defer p.spec.Cleanup()
+	}
 	cmd := newShellCommand(p.spec.Command)
 	cmd.Dir = p.spec.Dir
 	cmd.Env = p.spec.Env

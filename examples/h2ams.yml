@@ -4,7 +4,8 @@
 #   ├── h2ams.yml
 #   ├── api/       (Go API on :8080)
 #   ├── web/       (Vite frontend on :5173)
-#   └── worker/    (Python background worker)
+#   ├── worker/    (Python background worker)
+#   └── data/      (Postgres data, mounted into a container)
 #
 # Start everything in "dev" with:  h2ams up
 # Start only the API in "backend": h2ams up --env backend
@@ -16,9 +17,9 @@ default_environment: dev
 
 environments:
   dev:
-    apps: [api, web, worker]
+    apps: [db, api, web, worker]
   backend:
-    apps: [api, worker]
+    apps: [db, api, worker]
 
 # Local web UI. Each project's daemon needs its own port.
 dashboard:
@@ -30,6 +31,17 @@ notifications:
   crash_loop: true
 
 apps:
+  db:
+    docker:                 # a container instead of a command
+      image: postgres:16
+      ports: ["127.0.0.1:5432:5432"]
+      volumes: ["./data:/var/lib/postgresql/data"]   # ./ is relative to this file
+    env:                    # passed into the container
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: app_dev
+    restart:
+      policy: always
+
   api:
     command: go run ./cmd/api
     cwd: ./api              # relative to this file

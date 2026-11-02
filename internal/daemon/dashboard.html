@@ -41,6 +41,7 @@
   td.num { font-variant-numeric: tabular-nums; }
   .name { font-weight: 600; }
   .detail { color: var(--bad); font-size: 12px; white-space: normal; max-width: 320px; }
+  .container { color: var(--muted); font-size: 12px; white-space: normal; }
   .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
   .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
   .state.running::before { background: var(--ok); }
@@ -166,6 +167,7 @@ function render(data) {
 
     const stateCell = el("td", {}, el("span", { class: `state ${app.state}`, textContent: app.state }));
     if (app.error) stateCell.append(el("div", { class: "detail", textContent: app.error }));
+    if (app.container) stateCell.append(el("div", { class: "container", textContent: `container ${app.container.state || "absent"} · ${app.container.image}` }));
 
     const btn = (label, action, enabled) => el("button", {
       type: "button", textContent: label, disabled: isBusy || !enabled,
@@ -189,7 +191,7 @@ function render(data) {
 
 async function refresh() {
   try {
-    const res = await fetch("/api/status", { cache: "no-store" });
+    const res = await fetch("/api/v1/status", { cache: "no-store" });
     render(await res.json());
     $("conn").textContent = "connected";
     $("conn").classList.remove("down");
@@ -203,7 +205,7 @@ async function act(name, action) {
   busy.add(name);
   if (lastStatus) render(lastStatus);
   try {
-    const res = await fetch(`/api/apps/${encodeURIComponent(name)}/${action}`, { method: "POST" });
+    const res = await fetch(`/api/v1/apps/${encodeURIComponent(name)}/${action}`, { method: "POST" });
     const data = await res.json();
     if (data.error) toast(data.error);
     busy.delete(name);
@@ -238,7 +240,7 @@ function connectLogs() {
   decoder = new TextDecoder();
   const name = selected;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/api/apps/${encodeURIComponent(name)}/logs?lines=500`);
+  ws = new WebSocket(`${proto}://${location.host}/api/v1/apps/${encodeURIComponent(name)}/logs/ws?lines=500`);
   ws.binaryType = "arraybuffer";
   $("logs-state").textContent = "connecting…";
   ws.onopen = () => { $("logs-state").textContent = "live"; };

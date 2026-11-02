@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yvyty/h2ams/internal/config"
 	"github.com/yvyty/h2ams/internal/notify"
 	"github.com/yvyty/h2ams/internal/ports"
 	"github.com/yvyty/h2ams/internal/process"
@@ -29,15 +30,31 @@ type service struct {
 
 	usageMu sync.Mutex
 	usage   map[int]resources.Usage // by process group ID, from the monitor
+
+	containers      map[string]dockerApp // Docker apps by app name; fixed at start
+	containerMu     sync.Mutex
+	containerStates map[string]string // by container name, from the monitor
+
+	downOnce sync.Once
+}
+
+// stopAll stops every app once, for a down request.
+func (s *service) stopAll() {
+	s.downOnce.Do(s.mgr.StopAll)
 }
 
 // status returns the full daemon status with ports and resource use attached.
 func (s *service) status() Response {
 	resp := s.info
+	resp.APIVersion = APIVersion
 	resp.Apps = withPorts(s.mgr.Statuses())
+	s.attachContainers(resp.Apps)
 	s.usageMu.Lock()
 	defer s.usageMu.Unlock()
 	for i, app := range resp.Apps {
+		if resp.Apps[i].Container != nil {
+			continue // host figures would only describe the docker CLI
+		}
 		if u, ok := s.usage[app.PID]; ok && app.State == process.StateRunning {
 			cpu := u.CPUPercent
 			resp.Apps[i].CPUPercent = &cpu
@@ -63,6 +80,7 @@ func (s *service) monitor(ctx context.Context, notifier notify.Notifier, logf fu
 				logf("resource monitoring unavailable: %v", err)
 				sampleErrLogged = true
 			}
+			s.inspectContainers()
 		}
 		for _, msg := range detector.observe(time.Now(), statuses) {
 			logf("alert: %s", msg)
@@ -144,4 +162,65 @@ func withPorts(statuses []process.Status) []AppStatus {
 		}
 	}
 	return apps
+}
+
+// dockerApp is what status reports for a container app.
+type dockerApp struct {
+	container string
+	image     string
+	ports     []int // published host ports
+}
+
+func dockerApps(cfg *config.Config, project string, names []string) map[string]dockerApp {
+	apps := make(map[string]dockerApp)
+	for _, name := range names {
+		d := cfg.Apps[name].Docker
+		if d == nil {
+			continue
+		}
+		da := dockerApp{container: containerName(project, name), image: d.Image}
+		for _, p := range d.Ports {
+			if port, err := config.PublishedPort(p); err == nil {
+				da.ports = append(da.ports, port)
+			}
+		}
+		apps[name] = da
+	}
+	return apps
+}
+
+// attachContainers fills in container details for Docker apps. Their ports
+// are the published ones: the listening socket belongs to Docker's proxy,
+// not to the supervised docker CLI process.
+func (s *service) attachContainers(apps []AppStatus) {
+	if len(s.containers) == 0 {
+		return
+	}
+	s.containerMu.Lock()
+	defer s.containerMu.Unlock()
+	for i, app := range apps {
+		da, ok := s.containers[app.Name]
+		if !ok {
+			continue
+		}
+		apps[i].Container = &ContainerInfo{Name: da.container, Image: da.image, State: s.containerStates[da.container]}
+		apps[i].Ports = nil
+		if app.State == process.StateRunning {
+			apps[i].Ports = da.ports
+		}
+	}
+}
+
+func (s *service) inspectContainers() {
+	if len(s.containers) == 0 {
+		return
+	}
+	names := make([]string, 0, len(s.containers))
+	for _, da := range s.containers {
+		names = append(names, da.container)
+	}
+	states := inspectContainers(names)
+	s.containerMu.Lock()
+	s.containerStates = states
+	s.containerMu.Unlock()
 }
