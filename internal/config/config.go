@@ -37,12 +37,32 @@ const (
 	DefaultBackoff       = time.Second
 )
 
+// DefaultDashboardPort is where the web dashboard listens unless configured.
+const DefaultDashboardPort = 9999
+
 // Config is the root of h2ams.yml.
 type Config struct {
 	Version            int                    `yaml:"version"`
 	DefaultEnvironment string                 `yaml:"default_environment,omitempty"`
 	Environments       map[string]Environment `yaml:"environments,omitempty"`
 	Apps               map[string]App         `yaml:"apps"`
+	Dashboard          Dashboard              `yaml:"dashboard,omitempty"`
+	Notifications      Notifications          `yaml:"notifications,omitempty"`
+}
+
+// Dashboard configures the local web UI served by the daemon.
+type Dashboard struct {
+	Enabled *bool `yaml:"enabled,omitempty"` // nil means enabled
+	Port    int   `yaml:"port,omitempty"`    // 0 means DefaultDashboardPort
+}
+
+// IsEnabled reports whether the dashboard should run.
+func (d Dashboard) IsEnabled() bool { return d.Enabled == nil || *d.Enabled }
+
+// Notifications configures desktop notifications.
+type Notifications struct {
+	// CrashLoop notifies when an app restarts repeatedly or gives up.
+	CrashLoop bool `yaml:"crash_loop,omitempty"`
 }
 
 // Environment is a named group of apps started together.
@@ -119,6 +139,9 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Dashboard.Port == 0 {
+		c.Dashboard.Port = DefaultDashboardPort
+	}
 	for name, app := range c.Apps {
 		if app.Restart.Policy == "" {
 			app.Restart.Policy = DefaultRestartPolicy
@@ -194,6 +217,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Dashboard.Port < 1 || c.Dashboard.Port > 65535 {
+		add("dashboard.port: must be between 1 and 65535, got %d", c.Dashboard.Port)
+	}
+
 	if c.DefaultEnvironment != "" {
 		if _, ok := c.Environments[c.DefaultEnvironment]; !ok {
 			add("default_environment: unknown environment %q", c.DefaultEnvironment)
@@ -206,12 +233,20 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ResolveEnvironment returns the environment name that envName refers to:
+// envName itself, or the default environment when it is empty. An empty result
+// means "all apps".
+func (c *Config) ResolveEnvironment(envName string) string {
+	if envName == "" {
+		return c.DefaultEnvironment
+	}
+	return envName
+}
+
 // AppsFor returns the app names for an environment. An empty name means the
 // default environment, or every app when no default is set.
 func (c *Config) AppsFor(envName string) ([]string, error) {
-	if envName == "" {
-		envName = c.DefaultEnvironment
-	}
+	envName = c.ResolveEnvironment(envName)
 	if envName == "" {
 		return sortedKeys(c.Apps), nil
 	}

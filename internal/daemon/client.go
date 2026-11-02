@@ -12,13 +12,17 @@ import (
 
 // Request commands.
 const (
-	CmdStatus = "status"
-	CmdDown   = "down"
+	CmdStatus  = "status"
+	CmdDown    = "down"
+	CmdStart   = "start"   // needs App
+	CmdStop    = "stop"    // needs App
+	CmdRestart = "restart" // needs App
 )
 
 // Request is one client message. Each connection carries one request.
 type Request struct {
 	Cmd string `json:"cmd"`
+	App string `json:"app,omitempty"`
 }
 
 // Response is the daemon's reply.
@@ -26,14 +30,18 @@ type Response struct {
 	Error       string      `json:"error,omitempty"`
 	PID         int         `json:"pid,omitempty"`
 	ConfigPath  string      `json:"config_path,omitempty"`
-	Environment string      `json:"environment,omitempty"`
+	Environment string      `json:"environment,omitempty"` // empty means all apps
+	Dashboard   string      `json:"dashboard,omitempty"`   // URL; empty when disabled or unavailable
 	Apps        []AppStatus `json:"apps,omitempty"`
 }
 
-// AppStatus is a process status plus the TCP ports its process group listens on.
+// AppStatus is a process status plus what the daemon observes about the
+// app's whole process group: listening TCP ports and resource use.
 type AppStatus struct {
 	process.Status
-	Ports []int `json:"ports,omitempty"`
+	Ports       []int    `json:"ports,omitempty"`
+	CPUPercent  *float64 `json:"cpu_percent,omitempty"`  // nil until sampled, or unsupported
+	MemoryBytes uint64   `json:"memory_bytes,omitempty"` // resident set size
 }
 
 // ErrNotRunning means no daemon is listening on the socket.

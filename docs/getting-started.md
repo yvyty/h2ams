@@ -126,7 +126,33 @@ h2ams logs api -f
 Python is set to `PYTHONUNBUFFERED: "1"` above because Python buffers output
 when it isn't writing to a terminal, so without it the logs would lag.
 
-## 7. Stop everything
+## 7. Use the dashboard
+
+`h2ams up` and `h2ams status` print a dashboard address:
+
+```console
+$ h2ams status
+Environment: dev
+Dashboard:   http://127.0.0.1:9999
+
+APP  STATE    PID    PORTS  CPU   MEM       RESTARTS  UPTIME  DETAIL
+api  running  80083  8080   0.0%  24.3 MiB  0         1m2s    -
+web  running  80303  5173   0.0%  24.4 MiB  1         51s     -
+```
+
+Open it in your browser. You get the same table, refreshed every 2 seconds,
+with Start, Stop, and Restart buttons. Click an app to stream its logs live.
+The URL remembers the selection (`#app=web`), so you can bookmark it.
+
+The same actions are on the command line:
+
+```sh
+h2ams restart api   # stop and start again
+h2ams stop web      # stop one app; it stays stopped
+h2ams start web     # start it again
+```
+
+## 8. Stop everything
 
 ```console
 $ h2ams down
@@ -139,7 +165,9 @@ running after 5 seconds. Logs stay on disk, so `h2ams logs web` still works.
 ## Next steps
 
 - **Group apps into environments.** Add an `environments.backend` entry and
-  start only that set with `h2ams up --env backend`.
+  start only that set with `h2ams up --env backend`. `h2ams envs` lists them.
+- **Get told about crash loops.** Add `notifications: {crash_loop: true}` for
+  a desktop notification when an app keeps crashing.
 - **Tune restarts.** Use `policy: never` for one-off jobs, and raise
   `max_attempts` for apps that take a while to become healthy.
 - **Run several projects.** Each config file gets its own daemon. Use

@@ -21,7 +21,8 @@ func newStatusCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show the state of every managed app",
-		Long: `Show each app's state, PID, listening TCP ports, restart count, and uptime.
+		Long: `Show the active environment, the dashboard URL, and each app's state, PID,
+listening TCP ports, CPU and memory use, restart count, and uptime.
 
 States:
   starting    launched, not yet confirmed running
@@ -30,7 +31,9 @@ States:
   stopped     exited cleanly, or stopped by "h2ams down"
   failed      crashed and will not be restarted (policy or max_attempts)
 
-DETAIL shows the last exit error. Ports are detected on macOS and Linux.`,
+CPU is percent of one core and MEM is resident memory, both summed over the
+app and every process it started, sampled every 2 seconds. DETAIL shows the
+last exit error. Ports, CPU, and MEM are measured on macOS and Linux.`,
 		Example: "  h2ams status\n  h2ams status --config path/to/h2ams.yml",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -80,8 +83,18 @@ func newDownCmd(opts *rootOptions) *cobra.Command {
 }
 
 func printStatus(w io.Writer, resp daemon.Response) {
+	env := resp.Environment
+	if env == "" {
+		env = "(all apps)"
+	}
+	fmt.Fprintf(w, "Environment: %s\n", env)
+	if resp.Dashboard != "" {
+		fmt.Fprintf(w, "Dashboard:   %s\n", resp.Dashboard)
+	}
+	fmt.Fprintln(w)
+
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "APP\tSTATE\tPID\tPORTS\tRESTARTS\tUPTIME\tDETAIL")
+	fmt.Fprintln(tw, "APP\tSTATE\tPID\tPORTS\tCPU\tMEM\tRESTARTS\tUPTIME\tDETAIL")
 	for _, app := range resp.Apps {
 		pid, uptime := "-", "-"
 		if app.PID != 0 {
@@ -94,8 +107,15 @@ func printStatus(w io.Writer, resp daemon.Response) {
 		if detail == "" {
 			detail = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-			app.Name, app.State, pid, formatPorts(app.Ports), app.Restarts, uptime, detail)
+		cpu, mem := "-", "-"
+		if app.CPUPercent != nil {
+			cpu = fmt.Sprintf("%.1f%%", *app.CPUPercent)
+		}
+		if app.MemoryBytes > 0 {
+			mem = formatBytes(app.MemoryBytes)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			app.Name, app.State, pid, formatPorts(app.Ports), cpu, mem, app.Restarts, uptime, detail)
 	}
 	tw.Flush()
 }
@@ -109,4 +129,18 @@ func formatPorts(ports []int) string {
 		parts[i] = strconv.Itoa(p)
 	}
 	return strings.Join(parts, ",")
+}
+
+// formatBytes renders a byte count with a binary unit, e.g. "12.3 MiB".
+func formatBytes(n uint64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := uint64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }

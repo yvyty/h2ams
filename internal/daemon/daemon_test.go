@@ -40,7 +40,7 @@ func shortTempDir(t *testing.T) string {
 func writeConfig(t *testing.T, dir string, apps map[string]string) string {
 	t.Helper()
 	var b strings.Builder
-	b.WriteString("version: 1\napps:\n")
+	b.WriteString("version: 1\ndashboard:\n  enabled: false\napps:\n")
 	for name, cmd := range apps {
 		fmt.Fprintf(&b, "  %s:\n    command: %q\n", name, cmd)
 	}
@@ -168,6 +168,8 @@ func TestLogsSurviveRestart(t *testing.T) {
 	dir := shortTempDir(t)
 	cfgPath := filepath.Join(dir, config.DefaultFileName)
 	os.WriteFile(cfgPath, []byte(`version: 1
+dashboard:
+  enabled: false
 apps:
   flaky:
     command: echo out-line; echo err-line >&2; exit 1
@@ -200,6 +202,66 @@ apps:
 	if strings.Count(log, "out-line") != 2 || strings.Count(log, "err-line") != 2 {
 		t.Errorf("expected stdout and stderr from both runs:\n%s", log)
 	}
+}
+
+func TestSocketAppActions(t *testing.T) {
+	dir := shortTempDir(t)
+	cfgPath := writeConfig(t, dir, map[string]string{"api": testutil.Command(testutil.Sleep, "")})
+	opts := Options{ConfigPath: cfgPath, Paths: NewPaths(filepath.Join(dir, "state"))}
+	errCh := startDaemon(t, opts)
+	defer func() {
+		Call(opts.Paths.Socket, Request{Cmd: CmdDown}, timeout)
+		<-errCh
+	}()
+	sock := opts.Paths.Socket
+	pid := waitAppState(t, sock, "api", process.StateRunning).PID
+
+	resp, err := Call(sock, Request{Cmd: CmdRestart, App: "api"}, timeout)
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if newPID := waitAppState(t, sock, "api", process.StateRunning).PID; newPID == pid {
+		t.Errorf("restart kept pid %d (resp %+v)", pid, resp.Apps)
+	}
+
+	if _, err := Call(sock, Request{Cmd: CmdStop, App: "api"}, timeout); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	waitAppState(t, sock, "api", process.StateStopped)
+	if _, err := Call(sock, Request{Cmd: CmdStop, App: "api"}, timeout); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Errorf("second stop: err = %v", err)
+	}
+	if _, err := Call(sock, Request{Cmd: CmdStart, App: "api"}, timeout); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitAppState(t, sock, "api", process.StateRunning)
+
+	if _, err := Call(sock, Request{Cmd: CmdRestart, App: "ghost"}, timeout); err == nil || !strings.Contains(err.Error(), `unknown app "ghost"`) {
+		t.Errorf("unknown app: err = %v", err)
+	}
+}
+
+// waitAppState polls status until app reaches want and returns its status.
+func waitAppState(t *testing.T, sock, app string, want process.State) AppStatus {
+	t.Helper()
+	var last AppStatus
+	ok := testutil.WaitFor(timeout, func() bool {
+		resp, err := Call(sock, Request{Cmd: CmdStatus}, timeout)
+		if err != nil {
+			return false
+		}
+		for _, a := range resp.Apps {
+			if a.Name == app {
+				last = a
+				return a.State == want
+			}
+		}
+		return false
+	})
+	if !ok {
+		t.Fatalf("%s never reached %q (last %+v)", app, want, last)
+	}
+	return last
 }
 
 func TestStaleSocketIsReplaced(t *testing.T) {

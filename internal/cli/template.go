@@ -28,4 +28,13 @@ apps:
     cwd: ./web
     restart:
       policy: always
+
+# Web dashboard on http://127.0.0.1:9999 (status, actions, live logs).
+# dashboard:
+#   enabled: true
+#   port: 9999
+
+# Desktop notification when an app crash-loops or gives up.
+# notifications:
+#   crash_loop: true
 `

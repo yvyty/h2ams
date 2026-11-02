@@ -59,6 +59,13 @@ Each config file gets its own daemon, so several projects can run at once.`,
 		newStatusCmd(opts),
 		newDownCmd(opts),
 		newLogsCmd(opts),
+		newEnvsCmd(opts),
+		newAppActionCmd(opts, daemon.CmdStart, "Start a stopped or failed app",
+			"Start an app that is stopped or failed. Its restart count starts over."),
+		newAppActionCmd(opts, daemon.CmdStop, "Stop one app",
+			"Stop one app and keep it stopped (no automatic restarts) until\n\"h2ams start\" or \"h2ams restart\". The daemon and other apps keep running."),
+		newAppActionCmd(opts, daemon.CmdRestart, "Restart one app",
+			"Stop an app if it is running, then start it again with a fresh restart count."),
 		newDaemonCmd(opts),
 	)
 	return root

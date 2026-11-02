@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h2ams dashboard</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e4e4df;
+    --accent: #2f6fde; --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b; --idle: #8a8a84;
+    --log-bg: #15171a; --log-text: #d6d9de; --log-event: #8fb8ff;
+    --radius: 8px;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111214; --panel: #1a1c1f; --text: #e8e8e6; --muted: #9a9a95; --line: #2b2e33;
+      --accent: #6d9cff; --ok: #4cc27f; --warn: #e0a84a; --bad: #ef6b5d; --idle: #85857f;
+      --log-bg: #0b0c0e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+  .meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .env { font-weight: 600; color: var(--text); }
+  .conn { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .conn.down::before { background: var(--bad); }
+  main { padding: 16px 20px 24px; display: grid; gap: 16px; max-width: 1400px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .name { font-weight: 600; }
+  .detail { color: var(--bad); font-size: 12px; white-space: normal; max-width: 320px; }
+  .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+  .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+  .state.running::before { background: var(--ok); }
+  .state.starting::before, .state.restarting::before { background: var(--warn); }
+  .state.failed { color: var(--bad); }
+  .state.failed::before { background: var(--bad); }
+  .ports a { color: var(--accent); text-decoration: none; margin-right: 6px; }
+  .ports a:hover { text-decoration: underline; }
+  .muted { color: var(--muted); }
+  .actions { display: flex; gap: 6px; }
+  button { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .logs-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .logs-head h2 { margin: 0; font-size: 14px; }
+  .logs-head .spacer { flex: 1; }
+  .logs-head label { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 4px; }
+  pre#log { margin: 0; padding: 12px; height: 420px; overflow: auto; background: var(--log-bg); color: var(--log-text); font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre#log .event { color: var(--log-event); }
+  .empty { padding: 24px 12px; color: var(--muted); text-align: center; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bad); color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none; max-width: calc(100% - 32px); }
+  #toast.show { opacity: 1; }
+  @media (max-width: 640px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    pre#log { height: 320px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>h2ams</h1>
+  <span class="meta">environment <span class="env" id="env">…</span></span>
+  <span class="meta" id="config"></span>
+  <span class="conn" id="conn">connected</span>
+</header>
+<main>
+  <section class="panel">
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>App</th><th>State</th><th>PID</th><th>Ports</th><th>CPU</th><th>Memory</th>
+            <th>Restarts</th><th>Uptime</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="apps"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="logs-head">
+      <h2 id="logs-title">Logs</h2>
+      <span class="muted" id="logs-state"></span>
+      <span class="spacer"></span>
+      <label><input type="checkbox" id="follow" checked> Auto-scroll</label>
+      <button id="clear" type="button">Clear</button>
+    </div>
+    <pre id="log"><span class="muted">Select an app to stream its logs.</span></pre>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const ACTIVE = new Set(["starting", "running", "restarting"]);
+const MAX_LOG_CHARS = 500000;
+
+let selected = null;
+let lastStatus = null;
+let busy = new Set();
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") node.className = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node[k] = v;
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+function formatBytes(n) {
+  if (!n) return "–";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function formatUptime(startedAt) {
+  let s = Math.max(0, Math.floor((Date.now() - new Date(startedAt)) / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove("show"), 4000);
+}
+
+function render(data) {
+  lastStatus = data;
+  $("env").textContent = data.environment || "all apps";
+  $("config").textContent = data.config_path || "";
+  const rows = (data.apps || []).map((app) => {
+    const active = ACTIVE.has(app.state);
+    const running = app.state === "running";
+    const isBusy = busy.has(app.name);
+    const ports = el("td", { class: "ports" });
+    if (app.ports && app.ports.length) {
+      for (const p of app.ports) ports.append(el("a", { href: `http://localhost:${p}`, target: "_blank", rel: "noopener", textContent: p, onclick: (e) => e.stopPropagation() }));
+    } else ports.append(el("span", { class: "muted", textContent: "–" }));
+
+    const stateCell = el("td", {}, el("span", { class: `state ${app.state}`, textContent: app.state }));
+    if (app.error) stateCell.append(el("div", { class: "detail", textContent: app.error }));
+
+    const btn = (label, action, enabled) => el("button", {
+      type: "button", textContent: label, disabled: isBusy || !enabled,
+      onclick: (e) => { e.stopPropagation(); act(app.name, action); },
+    });
+    return el("tr", { class: app.name === selected ? "selected" : "", onclick: () => select(app.name) },
+      el("td", { class: "name", textContent: app.name }),
+      stateCell,
+      el("td", { class: "num", textContent: app.pid || "–" }),
+      ports,
+      el("td", { class: "num", textContent: running && app.cpu_percent != null ? `${app.cpu_percent.toFixed(1)}%` : "–" }),
+      el("td", { class: "num", textContent: running ? formatBytes(app.memory_bytes) : "–" }),
+      el("td", { class: "num", textContent: app.restarts }),
+      el("td", { class: "num", textContent: running && app.started_at ? formatUptime(app.started_at) : "–" }),
+      el("td", {}, el("div", { class: "actions" },
+        btn("Start", "start", !active), btn("Stop", "stop", active), btn("Restart", "restart", true))),
+    );
+  });
+  $("apps").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: 9, class: "empty", textContent: "No apps." }))]));
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    render(await res.json());
+    $("conn").textContent = "connected";
+    $("conn").classList.remove("down");
+  } catch {
+    $("conn").textContent = "daemon unreachable";
+    $("conn").classList.add("down");
+  }
+}
+
+async function act(name, action) {
+  busy.add(name);
+  if (lastStatus) render(lastStatus);
+  try {
+    const res = await fetch(`/api/apps/${encodeURIComponent(name)}/${action}`, { method: "POST" });
+    const data = await res.json();
+    if (data.error) toast(data.error);
+    busy.delete(name);
+    render(data);
+  } catch (e) {
+    busy.delete(name);
+    toast(`${action} ${name} failed: ${e}`);
+    refresh();
+  }
+}
+
+// ---- log streaming ----
+let ws = null;
+let carry = "";
+let decoder = null;
+let retry = null;
+
+function select(name) {
+  if (selected === name) return;
+  selected = name;
+  history.replaceState(null, "", `#app=${encodeURIComponent(name)}`);
+  if (lastStatus) render(lastStatus);
+  $("logs-title").textContent = `Logs: ${name}`;
+  $("log").replaceChildren();
+  connectLogs();
+}
+
+function connectLogs() {
+  clearTimeout(retry);
+  if (ws) { ws.onclose = null; ws.close(); }
+  carry = "";
+  decoder = new TextDecoder();
+  const name = selected;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/api/apps/${encodeURIComponent(name)}/logs?lines=500`);
+  ws.binaryType = "arraybuffer";
+  $("logs-state").textContent = "connecting…";
+  ws.onopen = () => { $("logs-state").textContent = "live"; };
+  ws.onmessage = (e) => appendLog(decoder.decode(e.data, { stream: true }));
+  ws.onclose = () => {
+    if (selected !== name) return;
+    $("logs-state").textContent = "disconnected, retrying…";
+    retry = setTimeout(() => { if (selected === name) { $("log").replaceChildren(); connectLogs(); } }, 2000);
+  };
+}
+
+function appendLog(text) {
+  const log = $("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  const parts = (carry + text).split("\n");
+  carry = parts.pop(); // incomplete last line waits for the next message
+  const frag = document.createDocumentFragment();
+  for (const line of parts) {
+    frag.append(line.startsWith("[h2ams ") ? el("span", { class: "event", textContent: line + "\n" }) : line + "\n");
+  }
+  log.append(frag);
+  while (log.textContent.length > MAX_LOG_CHARS && log.firstChild) log.firstChild.remove();
+  if ($("follow").checked && atBottom) log.scrollTop = log.scrollHeight;
+}
+
+$("clear").addEventListener("click", () => $("log").replaceChildren());
+const linked = new URLSearchParams(location.hash.slice(1)).get("app");
+if (linked) select(linked);
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

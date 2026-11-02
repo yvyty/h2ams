@@ -6,13 +6,14 @@ pile of terminal tabs. A background daemon keeps them running, restarts them
 when they crash, shows which ports they use, and keeps their logs.
 
 ```console
-$ h2ams up
-h2ams started (pid 4120, log ~/Library/Caches/h2ams/75abe6bb80dc/daemon.log)
+$ h2ams status
+Environment: dev
+Dashboard:   http://127.0.0.1:9999
 
-APP     STATE    PID   PORTS  RESTARTS  UPTIME  DETAIL
-api     running  4121  8080   0         0s      -
-web     running  4122  5173   0         0s      -
-worker  running  4123  -      0         0s      -
+APP     STATE    PID    PORTS  CPU   MEM       RESTARTS  UPTIME  DETAIL
+api     running  14958  8080   0.4%  24.3 MiB  0         3m12s   -
+web     running  14955  5173   1.2%  88.1 MiB  0         3m12s   -
+worker  running  14956  -      0.9%  3.1 MiB   0         3m12s   -
 ```
 
 ## Why
@@ -24,6 +25,10 @@ worker  running  4123  -      0         0s      -
 - **See what's running where.** `h2ams status` shows each app's state, PID,
   and the TCP ports it listens on.
 - **Logs that survive restarts.** Output from every run is kept on disk.
+- **A local dashboard.** <http://127.0.0.1:9999> shows every app with CPU and
+  memory, streams logs live, and has start/stop/restart buttons.
+- **Know when something is stuck.** Optional desktop notifications when an app
+  is crash-looping.
 
 ## Install
 
@@ -52,6 +57,8 @@ $EDITOR h2ams.yml     # describe your apps
 h2ams up              # start the daemon and your apps
 h2ams status          # see state, PIDs, and ports
 h2ams logs api -f     # stream one app's output (Ctrl-C to stop)
+h2ams restart api     # restart one app
+open http://127.0.0.1:9999   # or use the dashboard
 h2ams down            # stop everything
 ```
 
@@ -82,6 +89,12 @@ apps:
   web:
     command: npm run dev
     cwd: ./web
+
+dashboard:
+  port: 9999
+
+notifications:
+  crash_loop: true
 ```
 
 | Field | Required | Default | Description |
@@ -96,6 +109,9 @@ apps:
 | `apps.<name>.restart.policy` | no | `on-failure` | `always`, `on-failure` (non-zero exit only), or `never`. |
 | `apps.<name>.restart.max_attempts` | no | `5` | Restarts in a row before the app is marked `failed`. The count resets once a run lasts 10s. |
 | `apps.<name>.restart.backoff` | no | `1s` | Delay before the first restart; doubles each time, up to 30s. Go duration syntax (`500ms`, `2s`). |
+| `dashboard.enabled` | no | `true` | Serve the web dashboard. |
+| `dashboard.port` | no | `9999` | Dashboard port, always on `127.0.0.1`. Give each project its own port if you run several at once. |
+| `notifications.crash_loop` | no | `false` | Desktop notification when an app restarts 3 times within a minute, or gives up (`failed`). |
 
 Unknown fields are rejected, and every problem in the file is reported at once:
 
@@ -112,8 +128,12 @@ Error: h2ams.yml: invalid config:
 | --- | --- |
 | `h2ams init [--force]` | Write a template config. Refuses to overwrite an existing file without `--force`. |
 | `h2ams up [--env NAME]` | Validate the config, start the daemon in the background, and launch the environment's apps. |
-| `h2ams status` | Show each app's state, PID, ports, restart count, uptime, and last error. |
+| `h2ams status` | Show the environment, dashboard URL, and each app's state, PID, ports, CPU, memory, restarts, uptime, and last error. |
 | `h2ams logs <app> [-n N] [-f]` | Show the last N lines (default 100, `0` for all) of an app's output; `-f` follows new output. |
+| `h2ams start <app>` | Start a stopped or failed app. |
+| `h2ams stop <app>` | Stop one app and keep it stopped; everything else keeps running. |
+| `h2ams restart <app>` | Stop an app (if running) and start it again. |
+| `h2ams envs` | List environments and their apps, marking the default and the active one. |
 | `h2ams down` | Stop every app and the daemon. |
 
 Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run
@@ -129,6 +149,29 @@ Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run
 | `stopped` | Exited cleanly (and the policy doesn't restart it), or stopped by `h2ams down`. |
 | `failed` | Crashed and won't be restarted: the policy is `never`, or `max_attempts` ran out. |
 
+## Dashboard
+
+While the daemon runs, open the URL printed by `h2ams up` and `h2ams status`
+(default <http://127.0.0.1:9999>). It shows the active environment and every
+app with its state, ports (as links), CPU, memory, restarts, and uptime,
+refreshed every 2 seconds. Click an app to stream its logs live; the stream
+continues across restarts. The Start, Stop, and Restart buttons do exactly
+what the CLI commands do.
+
+The dashboard only listens on `127.0.0.1` and rejects requests that come from
+other websites, so pages open in your browser cannot control your apps. If
+the port is taken (for example by another project's daemon), the daemon keeps
+running without a dashboard and logs a warning to `daemon.log`; set
+`dashboard.port` to fix it. JSON is available at `/api/status`.
+
+## Environments
+
+An environment is a named list of apps. `h2ams up --env testing` starts only
+the apps in `testing`; without `--env`, `up` uses `default_environment`, or
+every app if none is set. `h2ams status`, `h2ams envs`, and the dashboard show
+which environment is active. To switch, run `h2ams down` and then
+`h2ams up --env <name>`.
+
 ## How it works
 
 - **One daemon per config file.** `h2ams up` starts `h2ams daemon` detached
@@ -141,6 +184,11 @@ Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run
   the state directory, along with `[h2ams ...]` lines marking every start,
   exit, restart, and stop. A log over 10 MB is rotated to `<app>.log.1` when
   the daemon next starts.
+- **Monitoring.** Every 2 seconds the daemon samples CPU (percent of one core)
+  and resident memory for each app's whole process group. Every second it
+  checks for crash loops: 3 automatic restarts within a minute, or an app
+  giving up. Alerts go to `daemon.log` and, if `notifications.crash_loop` is
+  on, to a desktop notification (once per episode).
 - **State directory.** `~/Library/Caches/h2ams/<hash>/` on macOS,
   `~/.cache/h2ams/<hash>/` on Linux. Override the base with `H2AMS_STATE_DIR`.
   It holds the socket, `daemon.log` (the daemon's own messages), and `logs/`.
@@ -151,6 +199,9 @@ Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run
 | --- | --- | --- | --- |
 | Start, stop, restart | ✅ | ✅ | best-effort (`taskkill`), untested |
 | Port detection | ✅ via `lsof` | ✅ via `/proc` | not yet |
+| CPU and memory | ✅ via `ps` | ✅ via `/proc` | not yet |
+| Desktop notifications | ✅ via `osascript` | ✅ via `notify-send` (libnotify) | not yet |
+| Dashboard | ✅ | ✅ | ✅ |
 | Apps die if the daemon is killed with `SIGKILL` | ❌ (stop with `h2ams down`) | ✅ | ❌ |
 
 ## Troubleshooting
@@ -167,6 +218,13 @@ Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run
   too long for a Unix socket. Set `H2AMS_STATE_DIR` to a shorter directory.
 - **No ports shown**: the app may not have started listening yet, it may
   listen on UDP only, or you are on Windows.
+- **No dashboard URL in `h2ams status`**: it is disabled, or its port was
+  busy when the daemon started. `daemon.log` says which; change
+  `dashboard.port` and restart with `h2ams down && h2ams up`.
+- **No desktop notifications**: set `notifications.crash_loop: true`. On
+  Linux install `notify-send` (package `libnotify-bin` or `libnotify`). On
+  macOS, allow notifications for Script Editor in System Settings. Failures
+  are logged to `daemon.log`.
 
 ## Development
 

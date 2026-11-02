@@ -20,6 +20,15 @@ environments:
   backend:
     apps: [api, worker]
 
+# Local web UI. Each project's daemon needs its own port.
+dashboard:
+  enabled: true
+  port: 9999
+
+# Desktop notification when an app restarts 3 times within a minute or gives up.
+notifications:
+  crash_loop: true
+
 apps:
   api:
     command: go run ./cmd/api

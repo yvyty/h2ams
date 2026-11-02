@@ -4,6 +4,9 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yvyty/h2ams/internal/config"
 	"github.com/yvyty/h2ams/internal/daemon"
 	"github.com/yvyty/h2ams/internal/process"
 )
@@ -26,6 +30,78 @@ func TestStatusAndDownWhenNotRunning(t *testing.T) {
 	}
 }
 
+func TestActionsWhenNotRunning(t *testing.T) {
+	t.Setenv(daemon.StateDirEnv, t.TempDir())
+	cfg := filepath.Join(t.TempDir(), "h2ams.yml")
+	for _, action := range []string{"start", "stop", "restart"} {
+		if _, err := run(t, action, "api", "--config", cfg); err == nil || !strings.Contains(err.Error(), `run "h2ams up" first`) {
+			t.Errorf("%s: err = %v", action, err)
+		}
+	}
+}
+
+func TestUpRejectsUnknownEnvironment(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "h2ams.yml")
+	os.WriteFile(cfg, []byte("version: 1\nenvironments:\n  dev:\n    apps: [a]\napps:\n  a:\n    command: x\n"), 0o644)
+	if _, err := run(t, "up", "-e", "testing", "--config", cfg); err == nil || !strings.Contains(err.Error(), `unknown environment "testing"`) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEnvsCommand(t *testing.T) {
+	t.Setenv(daemon.StateDirEnv, t.TempDir())
+	cfg := filepath.Join(t.TempDir(), "h2ams.yml")
+	os.WriteFile(cfg, []byte(`version: 1
+default_environment: dev
+environments:
+  dev:
+    apps: [api, web]
+  testing:
+    apps: [api, db]
+apps:
+  api: {command: x}
+  web: {command: x}
+  db: {command: x}
+`), 0o644)
+	out, err := run(t, "envs", "--config", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ENVIRONMENT", "dev *", "api, web", "default", "testing", "api, db"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("envs output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "active") {
+		t.Errorf("no daemon is running, but an environment is marked active:\n%s", out)
+	}
+}
+
+func TestPrintEnvsMarksActive(t *testing.T) {
+	cfg, err := config.Parse([]byte("version: 1\nenvironments:\n  dev:\n    apps: [a]\n  testing:\n    apps: [a]\napps:\n  a: {command: x}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	printEnvs(&b, cfg, "testing", true)
+	lines := strings.Split(b.String(), "\n")
+	var testingLine, allLine string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "testing") {
+			testingLine = l
+		}
+		if strings.HasPrefix(l, "(all apps) *") {
+			allLine = l
+		}
+	}
+	if !strings.Contains(testingLine, "active") {
+		t.Errorf("testing not marked active:\n%s", b.String())
+	}
+	if allLine == "" || !strings.Contains(allLine, "default") || strings.Contains(allLine, "active") {
+		t.Errorf("without default_environment, all apps should be the default:\n%s", b.String())
+	}
+}
+
 func TestUpRejectsInvalidConfig(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "h2ams.yml")
 	os.WriteFile(cfg, []byte("version: 1\napps:\n  a:\n    cwd: .\n"), 0o644)
@@ -36,14 +112,24 @@ func TestUpRejectsInvalidConfig(t *testing.T) {
 
 func TestPrintStatus(t *testing.T) {
 	var b bytes.Buffer
-	printStatus(&b, daemon.Response{Apps: []daemon.AppStatus{
-		{Status: process.Status{Name: "api", State: process.StateRunning, PID: 42, StartedAt: time.Now().Add(-3 * time.Second)}, Ports: []int{8080, 8443}},
+	printStatus(&b, daemon.Response{Environment: "dev", Dashboard: "http://127.0.0.1:9999", Apps: []daemon.AppStatus{
+		{Status: process.Status{Name: "api", State: process.StateRunning, PID: 42, StartedAt: time.Now().Add(-3 * time.Second)}, Ports: []int{8080, 8443}, CPUPercent: ptr(12.34), MemoryBytes: 52 << 20},
 		{Status: process.Status{Name: "web", State: process.StateFailed, Restarts: 5, Error: "gave up"}},
 	}})
 	out := b.String()
-	for _, want := range []string{"APP", "PORTS", "api", "running", "42", "8080,8443", "3s", "web", "failed", "gave up"} {
+	for _, want := range []string{"Environment: dev", "Dashboard:   http://127.0.0.1:9999", "APP", "PORTS", "CPU", "MEM", "12.3%", "52.0 MiB", "api", "running", "42", "8080,8443", "3s", "web", "failed", "gave up"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestFormatBytes(t *testing.T) {
+	for n, want := range map[uint64]string{0: "0 B", 512: "512 B", 2048: "2.0 KiB", 52 << 20: "52.0 MiB", 3 << 30: "3.0 GiB"} {
+		if got := formatBytes(n); got != want {
+			t.Errorf("formatBytes(%d) = %q, want %q", n, got, want)
 		}
 	}
 }
@@ -64,7 +150,13 @@ func TestBinaryUpStatusDown(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	cfg := filepath.Join(work, "h2ams.yml")
-	os.WriteFile(cfg, []byte("version: 1\napps:\n  sleeper:\n    command: echo hello-from-app; sleep 60\n"), 0o644)
+	ln, err := net.Listen("tcp", "127.0.0.1:0") // find a free dashboard port
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	os.WriteFile(cfg, []byte(fmt.Sprintf("version: 1\ndashboard:\n  port: %d\napps:\n  sleeper:\n    command: echo hello-from-app; sleep 60\n", dashPort)), 0o644)
 
 	h2ams := func(args ...string) string {
 		t.Helper()
@@ -78,9 +170,15 @@ func TestBinaryUpStatusDown(t *testing.T) {
 	}
 	t.Cleanup(func() { exec.Command(bin, "down", "--config", cfg).Run() })
 
-	if out := h2ams("up"); !strings.Contains(out, "h2ams started") || !strings.Contains(out, "sleeper") {
+	dashURL := fmt.Sprintf("http://127.0.0.1:%d", dashPort)
+	if out := h2ams("up"); !strings.Contains(out, "h2ams started") || !strings.Contains(out, "sleeper") || !strings.Contains(out, "Dashboard:   "+dashURL) {
 		t.Fatalf("up output:\n%s", out)
 	}
+	res, err := http.Get(dashURL + "/api/status")
+	if err != nil {
+		t.Fatalf("dashboard unreachable: %v", err)
+	}
+	res.Body.Close()
 
 	deadline := time.Now().Add(5 * time.Second)
 	var out string
@@ -96,6 +194,19 @@ func TestBinaryUpStatusDown(t *testing.T) {
 
 	if out := h2ams("logs", "sleeper"); !strings.Contains(out, "hello-from-app") || !strings.Contains(out, "sleeper: started") {
 		t.Fatalf("logs output:\n%s", out)
+	}
+
+	if out := h2ams("restart", "sleeper"); !strings.Contains(out, "sleeper") {
+		t.Fatalf("restart output:\n%s", out)
+	}
+	if out := h2ams("stop", "sleeper"); !strings.Contains(out, "stopped") {
+		t.Fatalf("stop output:\n%s", out)
+	}
+	if out := h2ams("start", "sleeper"); !strings.Contains(out, "sleeper") {
+		t.Fatalf("start output:\n%s", out)
+	}
+	if out := h2ams("logs", "sleeper", "-n", "0"); strings.Count(out, "sleeper: started") != 3 {
+		t.Fatalf("expected 3 starts after restart/stop/start:\n%s", out)
 	}
 
 	if out := h2ams("down"); !strings.Contains(out, "Stopped 1 app") {

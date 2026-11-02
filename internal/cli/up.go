@@ -134,6 +134,7 @@ func newDaemonCmd(opts *rootOptions) *cobra.Command {
 				ConfigPath:  cfgPath,
 				Environment: env,
 				Paths:       paths,
+				Log:         log,
 			})
 			fmt.Fprintf(log, "%s daemon stopped\n", time.Now().Format(time.RFC3339))
 			return err

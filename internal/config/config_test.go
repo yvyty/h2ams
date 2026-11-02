@@ -86,6 +86,7 @@ func TestParseErrors(t *testing.T) {
 			"version: 1\nenvironments:\n  \"dev/x\":\n    apps: [a]\napps:\n  a:\n    command: x\n",
 			[]string{"environments.dev/x: name must start"},
 		},
+		{"dashboard port out of range", "version: 1\ndashboard:\n  port: 70000\napps:\n  a:\n    command: x\n", []string{"dashboard.port: must be between 1 and 65535, got 70000"}},
 		{
 			"reports all problems",
 			"version: 2\napps:\n  a:\n    restart:\n      policy: bad\n",
@@ -126,6 +127,34 @@ func TestLoad(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.yml")); err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestDashboardAndNotifications(t *testing.T) {
+	cfg, err := Parse([]byte("version: 1\napps:\n  a:\n    command: x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Dashboard.IsEnabled() || cfg.Dashboard.Port != DefaultDashboardPort || cfg.Notifications.CrashLoop {
+		t.Errorf("defaults wrong: %+v %+v", cfg.Dashboard, cfg.Notifications)
+	}
+
+	cfg, err = Parse([]byte("version: 1\ndashboard:\n  enabled: false\n  port: 8000\nnotifications:\n  crash_loop: true\napps:\n  a:\n    command: x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Dashboard.IsEnabled() || cfg.Dashboard.Port != 8000 || !cfg.Notifications.CrashLoop {
+		t.Errorf("explicit values wrong: %+v %+v", cfg.Dashboard, cfg.Notifications)
+	}
+}
+
+func TestResolveEnvironment(t *testing.T) {
+	cfg, _ := Parse([]byte(validYAML))
+	if got := cfg.ResolveEnvironment(""); got != "dev" {
+		t.Errorf("default = %q, want dev", got)
+	}
+	if got := cfg.ResolveEnvironment("prod"); got != "prod" {
+		t.Errorf("explicit = %q", got)
 	}
 }
 

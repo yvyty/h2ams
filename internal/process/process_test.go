@@ -3,6 +3,7 @@
 package process
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -251,6 +252,73 @@ func TestBackoffFor(t *testing.T) {
 		if got := backoffFor(time.Second, tt.attempt); got != tt.want {
 			t.Errorf("backoffFor(1s, %d) = %v, want %v", tt.attempt, got, tt.want)
 		}
+	}
+}
+
+func TestManagerAppActions(t *testing.T) {
+	m := NewManager()
+	s := spec(testutil.Sleep, "")
+	s.Name = "api"
+	if err := m.Start([]Spec{s}); err != nil {
+		t.Fatal(err)
+	}
+	defer m.StopAll()
+	status := func() Status { return m.Statuses()[0] }
+	waitRunning := func() Status {
+		t.Helper()
+		var st Status
+		if !testutil.WaitFor(timeout, func() bool { st = status(); return st.State == StateRunning }) {
+			t.Fatalf("not running: %+v", st)
+		}
+		return st
+	}
+	first := waitRunning().PID
+
+	if err := m.StartApp("api"); !errors.Is(err, ErrAlreadyRunning) {
+		t.Errorf("StartApp on running app: err = %v", err)
+	}
+
+	if err := m.RestartApp("api"); err != nil {
+		t.Fatalf("RestartApp: %v", err)
+	}
+	second := waitRunning().PID
+	if second == first || testutil.Alive(first) {
+		t.Errorf("restart kept old pid %d (new %d, old alive=%v)", first, second, testutil.Alive(first))
+	}
+
+	if err := m.StopApp("api"); err != nil {
+		t.Fatalf("StopApp: %v", err)
+	}
+	if st := status(); st.State != StateStopped || testutil.Alive(second) {
+		t.Errorf("after StopApp: %+v", st)
+	}
+	if err := m.StopApp("api"); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("StopApp on stopped app: err = %v", err)
+	}
+
+	if err := m.StartApp("api"); err != nil {
+		t.Fatalf("StartApp: %v", err)
+	}
+	waitRunning()
+
+	for _, action := range []func(string) error{m.StartApp, m.StopApp, m.RestartApp} {
+		if err := action("ghost"); !errors.Is(err, ErrUnknownApp) {
+			t.Errorf("action on unknown app: err = %v", err)
+		}
+	}
+}
+
+func TestManagerStartsFailedApp(t *testing.T) {
+	m := NewManager()
+	s := spec(testutil.Crash, "")
+	s.Name, s.Policy = "job", config.RestartNever
+	m.Start([]Spec{s})
+	defer m.StopAll()
+	if !testutil.WaitFor(timeout, func() bool { return m.Statuses()[0].State == StateFailed }) {
+		t.Fatalf("never failed: %+v", m.Statuses())
+	}
+	if err := m.StartApp("job"); err != nil {
+		t.Fatalf("StartApp on failed app: %v", err)
 	}
 }
 
