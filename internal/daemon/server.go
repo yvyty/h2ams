@@ -194,6 +194,7 @@ func Specs(cfg *config.Config, baseDir, project string, names []string, output f
 			spec.Command = dockerRunCommand(project, container, dir, app)
 			spec.Env = os.Environ() // app env goes into the container via -e
 			spec.Cleanup = func() { removeContainer(container) }
+			spec.Precheck = checkDocker
 		}
 		specs = append(specs, spec)
 	}

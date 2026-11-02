@@ -55,6 +55,11 @@ type Spec struct {
 	// Cleanup, if set, runs before every start and after every exit (crash
 	// or stop). Docker apps use it to remove a leftover container.
 	Cleanup func()
+
+	// Precheck, if set, runs before every start. An error means the app
+	// cannot run at all (a missing tool, say): it fails at once with that
+	// error, without restart attempts.
+	Precheck func() error
 }
 
 // Status is a snapshot of a process, safe to serialize.
@@ -117,6 +122,13 @@ func (p *Process) supervise() {
 	defer close(p.done)
 	attempts := 0
 	for {
+		if p.spec.Precheck != nil {
+			if err := p.spec.Precheck(); err != nil {
+				p.settle(StateFailed, err)
+				p.event("cannot start: %v", err)
+				return
+			}
+		}
 		started := time.Now()
 		exitErr, stopped := p.runOnce()
 		if stopped {

@@ -394,3 +394,24 @@ func TestStopGivesChildrenTheGracePeriod(t *testing.T) {
 		t.Errorf("child was killed before finishing its shutdown (marker %q)", data)
 	}
 }
+
+func TestPrecheckFailureIsNotRetried(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "ran")
+	s := spec(testutil.Listen, out) // writes out if it ever runs
+	s.Policy = config.RestartAlways
+	s.MaxAttempts = 5
+	s.Precheck = func() error { return errors.New("tool missing") }
+	p := Start(s)
+	select {
+	case <-p.Done():
+	case <-time.After(timeout):
+		t.Fatalf("never settled: %+v", p.Status())
+	}
+	st := p.Status()
+	if st.State != StateFailed || st.Error != "tool missing" || st.Restarts != 0 || st.PID != 0 {
+		t.Errorf("status = %+v", st)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("command ran despite the failed precheck")
+	}
+}

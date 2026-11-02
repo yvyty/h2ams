@@ -283,3 +283,27 @@ func TestDockerPortsWaitForContainer(t *testing.T) {
 		t.Errorf("ports reported before the container exists: %+v (container %+v)", db, db.Container)
 	}
 }
+
+func TestMissingDockerFailsClearly(t *testing.T) {
+	t.Setenv(DockerEnv, "/no/such/docker")
+	dir := shortTempDir(t)
+	cfgPath := filepath.Join(dir, config.DefaultFileName)
+	os.WriteFile(cfgPath, []byte(fmt.Sprintf("version: 1\ndashboard:\n  enabled: false\napps:\n  db:\n    docker:\n      image: x\n  web:\n    command: %q\n", testutil.Command(testutil.Sleep, ""))), 0o644)
+	paths := NewPaths(filepath.Join(dir, "state"))
+	errCh := startDaemon(t, Options{ConfigPath: cfgPath, Paths: paths})
+	defer func() {
+		Call(paths.Socket, Request{Cmd: CmdDown}, timeout)
+		<-errCh
+	}()
+	db := waitAppState(t, paths.Socket, "db", process.StateFailed)
+	if db.Error != DockerEnv+"=/no/such/docker: not found or not executable" || db.Restarts != 0 {
+		t.Errorf("db = %+v", db)
+	}
+	waitAppState(t, paths.Socket, "web", process.StateRunning) // other apps are unaffected
+
+	t.Setenv(DockerEnv, "")
+	t.Setenv("PATH", t.TempDir())
+	if err := checkDocker(); err == nil || !strings.Contains(err.Error(), "docker CLI not found on PATH") {
+		t.Errorf("checkDocker without docker on PATH = %v", err)
+	}
+}

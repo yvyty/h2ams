@@ -200,7 +200,9 @@ containers.
 
 It needs the `docker` CLI on `PATH` and a running Docker daemon (Docker
 Desktop, Colima, OrbStack, or Docker Engine). Set `H2AMS_DOCKER` to use a
-different binary, such as `podman`.
+different binary, such as `podman`. Docker is only needed for container apps:
+if the CLI is missing, those apps fail at once with "docker CLI not found",
+and every other app runs normally.
 
 ## API and plugins
 

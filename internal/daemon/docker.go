@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,19 @@ func dockerBinary() string {
 		return bin
 	}
 	return "docker"
+}
+
+// checkDocker reports a clear error when the docker CLI cannot be found, so a
+// container app fails at once instead of retrying a command that cannot run.
+func checkDocker() error {
+	bin := dockerBinary()
+	if _, err := exec.LookPath(bin); err != nil {
+		if os.Getenv(DockerEnv) != "" {
+			return fmt.Errorf("%s=%s: not found or not executable", DockerEnv, bin)
+		}
+		return fmt.Errorf("docker CLI not found on PATH; install Docker or set %s", DockerEnv)
+	}
+	return nil
 }
 
 // containerName is unique per project and app, so two projects can run an
