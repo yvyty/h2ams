@@ -1,5 +1,3 @@
-//go:build unix
-
 package daemon
 
 import (
@@ -8,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -138,6 +137,9 @@ func TestContextCancelStopsApps(t *testing.T) {
 }
 
 func TestStatusReportsPorts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ports are not measured on Windows yet")
+	}
 	dir := shortTempDir(t)
 	out := filepath.Join(dir, "port")
 	cfgPath := writeConfig(t, dir, map[string]string{"web": testutil.Command(testutil.Listen, out)})
@@ -167,16 +169,16 @@ func TestStatusReportsPorts(t *testing.T) {
 func TestLogsSurviveRestart(t *testing.T) {
 	dir := shortTempDir(t)
 	cfgPath := filepath.Join(dir, config.DefaultFileName)
-	os.WriteFile(cfgPath, []byte(`version: 1
+	os.WriteFile(cfgPath, []byte(fmt.Sprintf(`version: 1
 dashboard:
   enabled: false
 apps:
   flaky:
-    command: echo out-line; echo err-line >&2; exit 1
+    command: %q
     restart:
       max_attempts: 1
       backoff: 10ms
-`), 0o644)
+`, testutil.Command(testutil.Fail, ""))), 0o644)
 	paths := NewPaths(filepath.Join(dir, "state"))
 	errCh := startDaemon(t, Options{ConfigPath: cfgPath, Paths: paths})
 
@@ -324,7 +326,8 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestSpecs(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
+	base, abs := t.TempDir(), t.TempDir() // absolute on every OS
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 version: 1
 apps:
   rel:
@@ -333,15 +336,15 @@ apps:
     env: {FOO: bar}
   abs:
     command: run
-    cwd: /tmp
+    cwd: %q
   none:
     command: run
-`))
+`, abs)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs := Specs(cfg, "/base", "proj", []string{"rel", "abs", "none"}, nil)
-	wantDirs := []string{"/base/sub", "/tmp", "/base"}
+	specs := Specs(cfg, base, "proj", []string{"rel", "abs", "none"}, nil)
+	wantDirs := []string{filepath.Join(base, "sub"), abs, base}
 	for i, s := range specs {
 		if s.Dir != wantDirs[i] {
 			t.Errorf("%s dir = %q, want %q", s.Name, s.Dir, wantDirs[i])
@@ -360,7 +363,7 @@ func TestPathsForIsStablePerConfig(t *testing.T) {
 	a, _ := PathsFor("/proj/a/h2ams.yml")
 	a2, _ := PathsFor("/proj/a/h2ams.yml")
 	b, _ := PathsFor("/proj/b/h2ams.yml")
-	if a != a2 || a == b || filepath.Dir(a.Dir) != "/state" {
+	if a != a2 || a == b || filepath.Dir(a.Dir) != filepath.FromSlash("/state") {
 		t.Errorf("paths a=%+v a2=%+v b=%+v", a, a2, b)
 	}
 }

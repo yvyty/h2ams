@@ -73,11 +73,7 @@ func dockerRunCommand(project, name, dir string, app config.App) string {
 	args = append(args, d.Image)
 	args = append(args, d.Args...)
 
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = shellQuote(a)
-	}
-	return "exec " + strings.Join(quoted, " ")
+	return shellLine(args)
 }
 
 // resolveVolume makes a relative host path ("./data", "../x", "~/y")
@@ -93,6 +89,74 @@ func resolveVolume(v, dir string) string {
 		}
 	}
 	return host + ":" + rest
+}
+
+// shellLineUnix is the /bin/sh form: exec replaces the shell, so the docker
+// CLI receives stop signals directly.
+func shellLineUnix(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellQuote(a)
+	}
+	return "exec " + strings.Join(quoted, " ")
+}
+
+// shellLineWindows is the cmd.exe form. cmd has no exec; each argument is
+// quoted with the usual Windows rules, and %, which cmd expands even inside
+// quotes, is escaped.
+func shellLineWindows(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = strings.ReplaceAll(windowsQuote(a), "%", "^%")
+	}
+	return strings.Join(quoted, " ")
+}
+
+// windowsQuote quotes s for CommandLineToArgvW. It is a copy of
+// syscall.EscapeArg (Windows-only), so it can be tested on every platform.
+func windowsQuote(s string) string {
+	if s == "" {
+		return `""`
+	}
+	needsBackslash, hasSpace := false, false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"', '\\':
+			needsBackslash = true
+		case ' ', '\t':
+			hasSpace = true
+		}
+	}
+	if !needsBackslash && !hasSpace {
+		return s
+	}
+	if !needsBackslash {
+		return `"` + s + `"`
+	}
+	var b strings.Builder
+	if hasSpace {
+		b.WriteByte('"')
+	}
+	slashes := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		default:
+			slashes = 0
+		case '\\':
+			slashes++
+		case '"':
+			// Double the backslashes before a quote, then escape the quote.
+			b.WriteString(strings.Repeat(`\`, slashes+1))
+			slashes = 0
+		}
+		b.WriteByte(c)
+	}
+	if hasSpace {
+		b.WriteString(strings.Repeat(`\`, slashes)) // so the closing quote isn't escaped
+		b.WriteByte('"')
+	}
+	return b.String()
 }
 
 func shellQuote(s string) string {

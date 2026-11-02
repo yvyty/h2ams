@@ -1,5 +1,3 @@
-//go:build unix
-
 // Package testutil provides a fake child process for supervisor tests: the
 // test binary re-executes itself in a helper mode instead of running tests.
 package testutil
@@ -14,6 +12,10 @@ import (
 	"syscall"
 	"time"
 )
+
+// noTests is a -test.run pattern that matches no test, in case a helper is
+// ever started without its mode.
+const noTests = "H2amsHelperMatchesNoTest"
 
 const (
 	modeEnv = "H2AMS_TEST_HELPER"
@@ -31,6 +33,9 @@ const (
 	IgnoreTerm = "ignore-term" // ignore SIGTERM, then sleep
 	Listen     = "listen"      // listen on a free TCP port, write it to out file, then sleep
 	Print      = "print"       // print $H2AMS_TEST_OUT to stdout and stderr, then sleep
+	Fail       = "fail"        // print "out-line" to stdout and "err-line" to stderr, then exit 1
+	Lines      = "lines"       // print line-1 .. line-5, then sleep
+	Hello      = "hello"       // print hello-<pid>, then sleep
 )
 
 // RunHelperIfRequested must be called first in TestMain. In helper mode it
@@ -70,6 +75,16 @@ func RunHelperIfRequested() {
 	case Print:
 		fmt.Fprintln(os.Stdout, out)
 		fmt.Fprintln(os.Stderr, out+" (stderr)")
+	case Fail:
+		fmt.Fprintln(os.Stdout, "out-line")
+		fmt.Fprintln(os.Stderr, "err-line")
+		os.Exit(1)
+	case Lines:
+		for i := 1; i <= 5; i++ {
+			fmt.Fprintf(os.Stdout, "line-%d\n", i)
+		}
+	case Hello:
+		fmt.Fprintf(os.Stdout, "hello-%d\n", os.Getpid())
 	case Sleep:
 	default:
 		fmt.Fprintf(os.Stderr, "unknown helper mode %q\n", mode)
@@ -79,21 +94,10 @@ func RunHelperIfRequested() {
 	os.Exit(0)
 }
 
-// Command returns a shell command that runs the test binary in mode,
-// writing to outFile where the mode uses one.
-func Command(mode, outFile string) string {
-	return fmt.Sprintf("%s=%s %s=%s %s -test.run='^$'",
-		modeEnv, mode, outEnv, quote(outFile), quote(os.Args[0]))
-}
-
 func writeAtomic(path, content string) {
 	tmp := path + ".tmp"
 	_ = os.WriteFile(tmp, []byte(content), 0o644)
 	_ = os.Rename(tmp, path)
-}
-
-func quote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // WaitFor polls cond every 10ms until it returns true or timeout elapses.
@@ -117,9 +121,4 @@ func ReadFile(path string, timeout time.Duration) (string, bool) {
 		return err == nil
 	})
 	return strings.TrimSpace(string(data)), ok
-}
-
-// Alive reports whether pid can still be signaled.
-func Alive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
 }

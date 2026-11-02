@@ -1,0 +1,112 @@
+# GoReleaser configuration (https://goreleaser.com), run by
+# .github/workflows/release.yml on a macOS runner: the macOS tray needs cgo,
+# and everything else cross-compiles without it from there.
+version: 2
+
+project_name: h2ams
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./internal/config/... # cheap sanity check before building
+
+builds:
+  # The CLI and daemon: cgo-free everywhere.
+  - id: h2ams
+    main: ./cmd/h2ams
+    binary: h2ams
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/yvyty/h2ams/internal/cli.Version={{ .Version }}
+    hooks:
+      post:
+        # Ad-hoc sign macOS binaries (decision recorded in Issue 4.2.2).
+        - cmd: '{{ if eq .Os "darwin" }}codesign --force --sign - {{ .Path }}{{ else }}true{{ end }}'
+
+  # The tray on Linux and Windows: no cgo needed.
+  - id: h2ams-tray
+    main: ./cmd/h2ams-tray
+    binary: h2ams-tray
+    env: [CGO_ENABLED=0]
+    goos: [linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+      - '{{ if eq .Os "windows" }}-H=windowsgui{{ end }}' # no console window
+
+  # The tray on macOS: needs cgo, so it is built on the macOS runner.
+  - id: h2ams-tray-darwin
+    main: ./cmd/h2ams-tray
+    binary: h2ams-tray
+    env: [CGO_ENABLED=1]
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    hooks:
+      post:
+        - codesign --force --sign - {{ .Path }}
+
+archives:
+  - id: h2ams
+    ids: [h2ams, h2ams-tray, h2ams-tray-darwin]
+    # Both binaries in one archive: "h2ams up" starts the h2ams-tray next to it.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - docs/*.md
+
+checksum:
+  name_template: checksums.txt
+
+# brew install --cask yvyty/tap/h2ams (macOS). Published only for final
+# releases, and only once the HOMEBREW_TAP_TOKEN secret exists: a
+# fine-grained token with Contents read/write on yvyty/homebrew-tap.
+homebrew_casks:
+  - name: h2ams
+    ids: [h2ams]
+    repository:
+      owner: yvyty
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    directory: Casks
+    homepage: https://github.com/yvyty/h2ams
+    description: Run and supervise all your local dev apps from one YAML file
+    license: MIT
+    # Both into the same bin, so "h2ams up" finds h2ams-tray next to it.
+    binaries: [h2ams, h2ams-tray]
+    skip_upload: '{{ if and (isEnvSet "HOMEBREW_TAP_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
+    hooks:
+      post:
+        # The binaries are ad-hoc signed, not notarized (Issue 4.2.2).
+        # Casks are macOS-only, so no OS check is needed.
+        install_steps: |
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/h2ams", "{{ .StagedPath }}/h2ams-tray"]
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  draft: true # reviewed and published by hand
+  prerelease: auto # tags like v0.1.0-rc.1 become prereleases
+  footer: |
+    Install: see [Install](https://github.com/yvyty/h2ams#install). On macOS,
+    downloaded binaries are ad-hoc signed; run
+    `xattr -d com.apple.quarantine h2ams h2ams-tray` once after unpacking.

@@ -1,0 +1,95 @@
+name: Release check
+
+# Builds a snapshot release (nothing is published) whenever the release
+# setup changes, then runs the packaged binaries on each OS.
+on:
+  pull_request:
+    paths:
+      - .goreleaser.yaml
+      - .github/workflows/release.yml
+      - .github/workflows/release-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+      - name: Verify macOS signatures
+        run: |
+          set -e
+          for bin in dist/*darwin*/h2ams dist/*darwin*/h2ams-tray; do
+            codesign --verify --strict "$bin"
+            echo "signed: $bin"
+          done
+      - name: Show the generated Homebrew cask
+        run: cat dist/homebrew/Casks/h2ams.rb
+      - name: List archives
+        run: ls -l dist/*.tar.gz dist/*.zip dist/checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+  smoke:
+    needs: snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            archive: linux_amd64.tar.gz
+          - os: macos-latest
+            archive: darwin_arm64.tar.gz
+          - os: windows-latest
+            archive: windows_amd64.zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: archives
+      - name: Verify checksums
+        run: |
+          if command -v sha256sum >/dev/null; then sha256sum --ignore-missing -c checksums.txt
+          else shasum -a 256 --ignore-missing -c checksums.txt; fi
+      - name: Unpack and run
+        run: |
+          set -e
+          archive=$(ls *_${{ matrix.archive }})
+          mkdir out
+          case "$archive" in
+            *.zip) unzip -q "$archive" -d out ;;
+            *) tar -xzf "$archive" -C out ;;
+          esac
+          ls out
+          test -f out/h2ams-tray* || { echo "h2ams-tray missing from $archive"; exit 1; }
+          ./out/h2ams --version | tee version.txt
+          grep -q SNAPSHOT version.txt
+          mkdir proj && cd proj
+          ../out/h2ams init
+          ../out/h2ams envs

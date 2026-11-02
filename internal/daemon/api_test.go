@@ -1,5 +1,3 @@
-//go:build unix
-
 package daemon
 
 import (
@@ -110,7 +108,7 @@ func socketOf(t *testing.T, c *http.Client) string {
 }
 
 func TestAPILogsPlainText(t *testing.T) {
-	_, c, _, _ := apiDaemon(t, "  api:\n    command: 'for i in 1 2 3 4 5; do echo line-$i; done; sleep 60'\n")
+	_, c, _, _ := apiDaemon(t, fmt.Sprintf("  api:\n    command: %q\n", testutil.Command(testutil.Lines, "")))
 	sock := socketOf(t, c)
 	waitAppState(t, sock, "api", process.StateRunning)
 
@@ -143,7 +141,7 @@ func TestAPILogsPlainText(t *testing.T) {
 }
 
 func TestAPILogsFollowAcrossRestart(t *testing.T) {
-	_, c, _, _ := apiDaemon(t, "  api:\n    command: echo hello-$$; sleep 60\n")
+	_, c, _, _ := apiDaemon(t, fmt.Sprintf("  api:\n    command: %q\n", testutil.Command(testutil.Hello, "")))
 	sock := socketOf(t, c)
 	waitAppState(t, sock, "api", process.StateRunning)
 

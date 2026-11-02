@@ -1,5 +1,7 @@
 # H2AMS
 
+[![CI](https://github.com/yvyty/h2ams/actions/workflows/ci.yml/badge.svg)](https://github.com/yvyty/h2ams/actions/workflows/ci.yml)
+
 **High Availability Application Management Service.** Run all the apps you
 develop against (APIs, frontends, workers) from one `h2ams.yml` instead of a
 pile of terminal tabs. A background daemon keeps them running, restarts them
@@ -36,19 +38,51 @@ worker  running  14956  -      0.9%  3.1 MiB   0         3m12s   -
 
 ## Install
 
-Requires Go 1.27 or newer. Runs on macOS and Linux; Windows support is
-best-effort (see [Platform support](#platform-support)).
+Each release ships `h2ams` and `h2ams-tray` together for macOS, Linux, and
+Windows (amd64 and arm64). Keep both in the same folder: `h2ams up` starts
+the `h2ams-tray` next to it.
+
+**Homebrew** (macOS and Linux):
+
+```sh
+brew install --cask yvyty/tap/h2ams
+```
+
+**Download** the archive for your platform from
+[Releases](https://github.com/yvyty/h2ams/releases), check it against
+`checksums.txt`, and put both binaries on your `PATH`:
+
+```sh
+# macOS / Linux (example: macOS on Apple silicon)
+tar -xzf h2ams_<version>_darwin_arm64.tar.gz
+sudo mv h2ams h2ams-tray /usr/local/bin/
+# macOS only: the binaries are ad-hoc signed, not notarized, so clear the
+# download quarantine once (Homebrew does this for you)
+xattr -d com.apple.quarantine /usr/local/bin/h2ams /usr/local/bin/h2ams-tray
+```
+
+On Windows, unzip `h2ams_<version>_windows_amd64.zip` into a folder such as
+`%LocalAppData%\Programs\h2ams` and add that folder to your user `PATH`
+(Settings → System → About → Advanced system settings → Environment
+Variables). Windows 10 1803 or newer is required.
+
+**With Go** (1.27 or newer):
 
 ```sh
 go install github.com/yvyty/h2ams/cmd/h2ams@latest
+go install github.com/yvyty/h2ams/cmd/h2ams-tray@latest
 ```
 
-Or build from a checkout:
+Go puts them in `$(go env GOPATH)/bin`, usually `~/go/bin`. If `h2ams` is
+"not found" afterwards, add that folder to your `PATH`, for example in
+`~/.zshrc` or `~/.bashrc`:
 
 ```sh
-git clone <repo-url> h2ams && cd h2ams
-go build -o bin/h2ams ./cmd/h2ams
+export PATH="$HOME/go/bin:$PATH"
 ```
+
+`h2ams-tray` needs cgo on macOS, so `go install` of the tray there needs the
+Xcode command-line tools (`xcode-select --install`).
 
 Check it works with `h2ams --version`.
 
@@ -259,22 +293,31 @@ which environment is active. To switch, run `h2ams down` and then
   giving up. Alerts go to `daemon.log` and, if `notifications.crash_loop` is
   on, to a desktop notification (once per episode).
 - **State directory.** `~/Library/Caches/h2ams/<hash>/` on macOS,
-  `~/.cache/h2ams/<hash>/` on Linux. Override the base with `H2AMS_STATE_DIR`.
+  `~/.cache/h2ams/<hash>/` on Linux, `%LocalAppData%\h2ams\<hash>\` on
+  Windows. Override the base with `H2AMS_STATE_DIR`.
   It holds the socket, `daemon.log` (the daemon's own messages), `logs/`, and
   `project.json` (which config it belongs to, used by `h2ams-tray`).
 
 ## Platform support
 
+Every push runs the test suite on macOS, Linux, and Windows (see the CI badge
+above).
+
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
-| Start, stop, restart | ✅ | ✅ | best-effort (`taskkill`), untested |
+| Start, stop, restart | ✅ | ✅ | ✅ (Windows 10 1803+); stop is immediate, see below |
 | Port detection | ✅ via `lsof` | ✅ via `/proc` | not yet |
 | CPU and memory | ✅ via `ps` | ✅ via `/proc` | not yet |
 | Desktop notifications | ✅ via `osascript` | ✅ via `notify-send` (libnotify) | not yet |
 | Dashboard and API | ✅ | ✅ | ✅ |
-| Docker apps | ✅ | ✅ | best-effort, untested |
-| `h2ams-tray` | ✅ (cgo build) | ✅ (StatusNotifierItem desktops) | ✅, manual check |
+| Docker apps | ✅ | ✅ | builds the `cmd.exe` command line; not run against Docker in CI |
+| `h2ams-tray` | ✅ (cgo build) | ✅ (StatusNotifierItem desktops) | ✅ starts in CI; menu checked by hand |
 | Apps die if the daemon is killed with `SIGKILL` | ❌ (stop with `h2ams down`) | ✅ | ❌ |
+
+On Windows, apps run through `cmd.exe`, and stopping one kills its process
+tree at once: Windows has no way to ask a console program to shut down
+gracefully from outside (`taskkill` without `/F` only works for windowed
+programs, which do get a polite close first).
 
 ## Troubleshooting
 
@@ -297,6 +340,19 @@ which environment is active. To switch, run `h2ams down` and then
   Linux install `notify-send` (package `libnotify-bin` or `libnotify`). On
   macOS, allow notifications for Script Editor in System Settings. Failures
   are logged to `daemon.log`.
+
+## Versioning
+
+h2ams follows [Semantic Versioning](https://semver.org/). Before 1.0, a minor
+release (0.2.0) may change the config format or CLI, and the
+[changelog](CHANGELOG.md) says how to update; patch releases (0.1.1) only fix
+bugs.
+
+The HTTP API is versioned separately, in its path (`/api/v1`). Within `v1`,
+fields and states may be added but never removed or renamed, so clients
+should ignore what they don't know. A breaking API change gets `/api/v2`,
+served next to `v1` for at least one minor release. `h2ams --version` prints
+the release, and every API response carries `"api_version"`.
 
 ## Development
 

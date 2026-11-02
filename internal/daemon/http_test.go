@@ -1,5 +1,3 @@
-//go:build unix
-
 package daemon
 
 import (
@@ -12,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -121,6 +120,9 @@ func waitHTTPState(t *testing.T, baseURL, app string, want process.State) AppSta
 }
 
 func TestDashboardStatusEndpoint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ports are not measured on Windows yet")
+	}
 	out := filepath.Join(shortTempDir(t), "port")
 	base, _, _ := dashboardDaemon(t, fmt.Sprintf(`version: 1
 default_environment: dev
@@ -281,11 +283,7 @@ func readLogs(ctx context.Context, conn *websocket.Conn, into *wsReader) {
 }
 
 func TestDashboardLogStreamSurvivesRestart(t *testing.T) {
-	base, _, _ := dashboardDaemon(t, `version: 1
-apps:
-  api:
-    command: echo hello-$$; sleep 60
-`)
+	base, _, _ := dashboardDaemon(t, fmt.Sprintf("version: 1\napps:\n  api:\n    command: %q\n", testutil.Command(testutil.Hello, "")))
 	waitHTTPState(t, base, "api", process.StateRunning)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*timeout)

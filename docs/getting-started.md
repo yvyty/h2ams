@@ -11,11 +11,12 @@ as you go.
 ## 1. Install
 
 ```sh
-go install github.com/yvyty/h2ams/cmd/h2ams@latest
+brew install --cask yvyty/tap/h2ams   # or download a release, or go install
 h2ams --version
 ```
 
-See the [README](../README.md#install) for building from source.
+See the [README](../README.md#install) for release downloads, Windows, and
+`go install` (including adding `~/go/bin` to your `PATH`).
 
 ## 2. Create a config
 

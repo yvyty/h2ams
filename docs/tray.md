@@ -39,12 +39,9 @@ notification with the error.
 ## Install
 
 `h2ams-tray` is a separate binary because tray support needs cgo on macOS,
-while `h2ams` itself stays cgo-free. Install both into the same directory:
-
-```sh
-go install github.com/yvyty/h2ams/cmd/h2ams@latest
-go install github.com/yvyty/h2ams/cmd/h2ams-tray@latest
-```
+while `h2ams` itself stays cgo-free. Every install method in the
+[README](../README.md#install) (Homebrew, release archives, `go install`)
+puts both binaries in the same directory, which is what `h2ams up` needs.
 
 You don't need to start it yourself: `h2ams up` starts the `h2ams-tray`
 installed next to it, so the icon appears whenever h2ams is running. Only

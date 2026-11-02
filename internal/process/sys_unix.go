@@ -13,8 +13,12 @@ func newShellCommand(command string) *exec.Cmd {
 	return cmd
 }
 
-// terminateGroup sends SIGTERM to the whole process group led by pid.
-func terminateGroup(pid int) { _ = syscall.Kill(-pid, syscall.SIGTERM) }
+// terminateGroup sends SIGTERM to the whole process group led by pid. It
+// reports whether a graceful stop was requested (always, on Unix).
+func terminateGroup(pid int) bool {
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	return true
+}
 
 // groupAlive reports whether any process is left in the group led by pid.
 func groupAlive(pid int) bool {
