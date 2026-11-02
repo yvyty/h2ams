@@ -27,6 +27,7 @@ func TestHealth(t *testing.T) {
 		{Project{Running: true, Apps: []daemon.AppStatus{app("a", process.StateRunning)}}, OK},
 		{Project{Running: true, Apps: []daemon.AppStatus{app("a", process.StateRunning), app("b", process.StateRestarting)}}, Warn},
 		{Project{Running: true, Apps: []daemon.AppStatus{app("a", process.StateStopped)}}, Warn},
+		{Project{Running: true, Apps: []daemon.AppStatus{app("a", process.StateRunning), app("build", process.StateCompleted)}}, OK},
 		{Project{Running: true, Apps: []daemon.AppStatus{app("a", process.StateRestarting), app("b", process.StateFailed)}}, Bad},
 	}
 	for i, tt := range tests {

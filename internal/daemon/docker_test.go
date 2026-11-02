@@ -260,3 +260,26 @@ apps:
 		t.Errorf("container still exists after stop: %s", out)
 	}
 }
+
+// TestDockerPortsWaitForContainer: while the image is still pulling (the
+// docker CLI runs but no container exists yet), no ports are reported.
+func TestDockerPortsWaitForContainer(t *testing.T) {
+	dir := shortTempDir(t)
+	bin := filepath.Join(dir, "docker")
+	// "run" never creates a container; "inspect" finds nothing.
+	os.WriteFile(bin, []byte("#!/bin/sh\ncase \"$1\" in run) echo pulling; exec sleep 60;; inspect) exit 1;; esac\n"), 0o755)
+	t.Setenv(DockerEnv, bin)
+
+	cfgPath := filepath.Join(dir, config.DefaultFileName)
+	os.WriteFile(cfgPath, []byte("version: 1\ndashboard:\n  enabled: false\napps:\n  db:\n    docker:\n      image: x\n      ports: [\"15433:5432\"]\n"), 0o644)
+	paths := NewPaths(filepath.Join(dir, "state"))
+	errCh := startDaemon(t, Options{ConfigPath: cfgPath, Paths: paths})
+	defer func() {
+		Call(paths.Socket, Request{Cmd: CmdDown}, timeout)
+		<-errCh
+	}()
+	db := waitAppState(t, paths.Socket, "db", process.StateRunning)
+	if len(db.Ports) != 0 || db.Container == nil || db.Container.State != "" {
+		t.Errorf("ports reported before the container exists: %+v (container %+v)", db, db.Container)
+	}
+}

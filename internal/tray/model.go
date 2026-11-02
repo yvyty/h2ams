@@ -52,7 +52,7 @@ func (p Project) Health() Health {
 		switch app.State {
 		case process.StateFailed:
 			return Bad
-		case process.StateRunning:
+		case process.StateRunning, process.StateCompleted: // a finished one-shot job is healthy
 		default:
 			h = Warn
 		}

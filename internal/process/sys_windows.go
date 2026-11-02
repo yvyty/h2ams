@@ -25,6 +25,10 @@ func terminateGroup(pid int) {
 	_ = exec.Command("taskkill", "/T", "/PID", strconv.Itoa(pid)).Run()
 }
 
+// groupAlive is always false on Windows: taskkill /T already waits for the
+// tree, and a cmd.exe leader does not exit before its child.
+func groupAlive(int) bool { return false }
+
 // killGroup forcefully kills the process tree rooted at pid.
 func killGroup(pid int) {
 	_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()

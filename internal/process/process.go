@@ -20,6 +20,7 @@ const (
 	StateRunning    State = "running"
 	StateRestarting State = "restarting"
 	StateStopped    State = "stopped"
+	StateCompleted  State = "completed" // exited 0 and its policy does not restart it
 	StateFailed     State = "failed"
 )
 
@@ -133,7 +134,7 @@ func (p *Process) supervise() {
 				p.settle(StateFailed, exitErr)
 				p.event("failed; restart policy is %s", p.spec.Policy)
 			} else {
-				p.settle(StateStopped, nil)
+				p.settle(StateCompleted, nil)
 			}
 			return
 		}
@@ -206,15 +207,33 @@ func (p *Process) runOnce() (exitErr error, stopped bool) {
 }
 
 // terminate asks the process group to exit, then kills it after StopTimeout.
+//
+// The leader exiting is not the end: on Linux /bin/sh (dash) does not exec a
+// single command, so the leader is a shell that dies on SIGTERM at once while
+// the real app is still shutting down. The rest of the group gets whatever is
+// left of the grace period before it is killed.
 func (p *Process) terminate(pid int, waitErr <-chan error) {
 	terminateGroup(pid)
+	deadline := time.NewTimer(p.spec.StopTimeout)
+	defer deadline.Stop()
 	select {
 	case <-waitErr:
-	case <-time.After(p.spec.StopTimeout):
+	case <-deadline.C:
 		killGroup(pid)
 		<-waitErr
+		return
 	}
-	killGroup(pid)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	for groupAlive(pid) {
+		select {
+		case <-deadline.C:
+			killGroup(pid)
+			return
+		case <-poll.C:
+		}
+	}
+	killGroup(pid) // in case something appeared between the check and here
 }
 
 func (p *Process) shouldRestart(failed bool) bool {

@@ -4,6 +4,7 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -162,7 +163,8 @@ func TestRestartPolicies(t *testing.T) {
 		want   State
 	}{
 		{"never does not restart a crash", config.RestartNever, testutil.Crash, StateFailed},
-		{"on-failure leaves a clean exit stopped", config.RestartOnFailure, testutil.Exit0, StateStopped},
+		{"on-failure leaves a clean exit completed", config.RestartOnFailure, testutil.Exit0, StateCompleted},
+		{"never leaves a clean exit completed", config.RestartNever, testutil.Exit0, StateCompleted},
 		{"always restarts a clean exit", config.RestartAlways, testutil.Exit0, StateFailed},
 	}
 	for _, tt := range tests {
@@ -371,5 +373,24 @@ func TestManager(t *testing.T) {
 		if st.State != StateStopped {
 			t.Errorf("%s state = %q after StopAll", st.Name, st.State)
 		}
+	}
+}
+
+// TestStopGivesChildrenTheGracePeriod covers a leader that exits on SIGTERM
+// right away (as /bin/sh does on Linux) while its child is still shutting
+// down: the child must get the grace period, not an immediate SIGKILL.
+func TestStopGivesChildrenTheGracePeriod(t *testing.T) {
+	dir := t.TempDir()
+	done := filepath.Join(dir, "done")
+	// The child traps TERM and needs 300ms to finish; the wrapper shell dies on TERM.
+	child := fmt.Sprintf(`trap 'sleep 0.3; echo clean > %q; exit 0' TERM; while :; do sleep 0.05; done`, done)
+	s := Spec{Name: "wrapped", Command: fmt.Sprintf("sh -c %q; echo wrapper-done", child), Policy: config.RestartNever, StopTimeout: 3 * time.Second}
+	p := Start(s)
+	waitState(t, p, StateRunning)
+	time.Sleep(200 * time.Millisecond) // let the child install its trap
+
+	p.Stop()
+	if data, _ := os.ReadFile(done); strings.TrimSpace(string(data)) != "clean" {
+		t.Errorf("child was killed before finishing its shutdown (marker %q)", data)
 	}
 }

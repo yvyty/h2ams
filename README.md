@@ -154,7 +154,8 @@ Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run
 | `starting` | Launched, not yet confirmed running. |
 | `running` | Up and supervised. |
 | `restarting` | Exited; waiting out the backoff before starting again. |
-| `stopped` | Exited cleanly (and the policy doesn't restart it), or stopped by `h2ams down`. |
+| `completed` | Exited successfully and the policy doesn't restart it, such as a one-shot build. |
+| `stopped` | Stopped by `h2ams stop` or `h2ams down`. |
 | `failed` | Crashed and won't be restarted: the policy is `never`, or `max_attempts` ran out. |
 
 ## Dashboard
@@ -239,13 +240,17 @@ which environment is active. To switch, run `h2ams down` and then
   talks to it over the same HTTP API that plugins use.
 - **Process groups.** Each app runs in its own process group. Stopping an app
   sends `SIGTERM` to the whole group (so `npm run dev` takes its children with
-  it), then `SIGKILL` after 5 seconds.
+  it), then `SIGKILL` once the whole group is gone or after 5 seconds. If
+  the wrapping shell exits first (as `/bin/sh` does on Linux), the rest of the
+  group still gets the full grace period.
 - **Logs.** Each app's stdout and stderr are appended to `logs/<app>.log` in
   the state directory, along with `[h2ams ...]` lines marking every start,
   exit, restart, and stop. A log over 10 MB is rotated to `<app>.log.1` when
   the daemon next starts.
 - **Monitoring.** Every 2 seconds the daemon samples CPU (percent of one core)
-  and resident memory for each app's whole process group. Every second it
+  and resident memory for each app's whole process group, plus descendants
+  that moved to groups of their own (such as the esbuild and tailwind watchers
+  that Phoenix starts through Erlang). Every second it
   checks for crash loops: 3 automatic restarts within a minute, or an app
   giving up. Alerts go to `daemon.log` and, if `notifications.crash_loop` is
   on, to a desktop notification (once per episode).

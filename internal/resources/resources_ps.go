@@ -17,7 +17,7 @@ func (s *Sampler) sample(pgids []int) (map[int]Usage, error) {
 		return nil, fmt.Errorf("resource monitoring needs ps: %w", errors.ErrUnsupported)
 	}
 	var out bytes.Buffer
-	cmd := exec.Command(bin, "-A", "-o", "pgid=,rss=,%cpu=")
+	cmd := exec.Command(bin, "-A", "-o", "pid=,ppid=,pgid=,rss=,%cpu=")
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("running ps: %w", err)
@@ -26,5 +26,5 @@ func (s *Sampler) sample(pgids []int) (map[int]Usage, error) {
 	for _, id := range pgids {
 		want[id] = true
 	}
-	return parsePS(&out, want), nil
+	return sumPS(parsePS(&out), want), nil
 }

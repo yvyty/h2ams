@@ -203,9 +203,10 @@ func (s *service) attachContainers(apps []AppStatus) {
 		if !ok {
 			continue
 		}
-		apps[i].Container = &ContainerInfo{Name: da.container, Image: da.image, State: s.containerStates[da.container]}
+		state := s.containerStates[da.container]
+		apps[i].Container = &ContainerInfo{Name: da.container, Image: da.image, State: state}
 		apps[i].Ports = nil
-		if app.State == process.StateRunning {
+		if app.State == process.StateRunning && state == "running" { // not while the image is still pulling or starting
 			apps[i].Ports = da.ports
 		}
 	}

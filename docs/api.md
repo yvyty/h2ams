@@ -104,7 +104,7 @@ Errors set `error` and an HTTP status code:
 | `environment` | string | Active environment; omitted when every app runs (no environment). |
 | `dashboard` | string | Dashboard URL; omitted when disabled or its port was busy. |
 | `apps[].name` | string | App name from the config. |
-| `apps[].state` | string | `starting`, `running`, `restarting`, `stopped`, or `failed`. |
+| `apps[].state` | string | `starting`, `running`, `restarting`, `completed`, `stopped`, or `failed`. `completed` was added in v1 without a version bump: treat unknown states as not running. |
 | `apps[].pid` | int | Omitted unless running. Also the app's process group ID. |
 | `apps[].restarts` | int | Automatic restarts since the app was last started on purpose. |
 | `apps[].exit_code` | int | Last exit code; omitted when 0. |
@@ -127,7 +127,7 @@ curl --unix-socket "$SOCK" http://h2ams/api/v1/status
 
 ### `POST /api/v1/apps/{app}/start`
 
-Starts an app that is `stopped` or `failed`, with a fresh restart count.
+Starts an app that is `stopped`, `completed`, or `failed`, with a fresh restart count.
 `409` if it is already starting, running, or restarting.
 
 ### `POST /api/v1/apps/{app}/stop`

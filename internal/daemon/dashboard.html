@@ -46,6 +46,7 @@
   .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
   .state.running::before { background: var(--ok); }
   .state.starting::before, .state.restarting::before { background: var(--warn); }
+  .state.completed::before { background: var(--ok); opacity: .45; }
   .state.failed { color: var(--bad); }
   .state.failed::before { background: var(--bad); }
   .ports a { color: var(--accent); text-decoration: none; margin-right: 6px; }

@@ -9,16 +9,39 @@ import (
 )
 
 func TestParsePS(t *testing.T) {
-	out := `    1  21472   0.0
-  100   1024   1.5
-  100   2048  10,5
-  200    512   3.0
+	out := `    1     0     1  21472   0.0
+  100     1   100   1024   1.5
+  101   100   100   2048  10,5
+  200     1   200    512   3.0
   bad   line
 `
-	got := parsePS(strings.NewReader(out), map[int]bool{100: true, 300: true})
+	got := sumPS(parsePS(strings.NewReader(out)), map[int]bool{100: true, 300: true})
 	want := map[int]Usage{100: {CPUPercent: 12, MemoryBytes: 3072 * 1024}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parsePS = %+v, want %+v", got, want)
+		t.Errorf("sumPS = %+v, want %+v", got, want)
+	}
+}
+
+func TestOwnersFollowsDescendantsIntoNewGroups(t *testing.T) {
+	procs := []proc{
+		{pid: 1, ppid: 0, pgid: 1},
+		{pid: 50, ppid: 1, pgid: 50},     // the h2ams daemon
+		{pid: 100, ppid: 50, pgid: 100},  // app "web" (group leader)
+		{pid: 110, ppid: 100, pgid: 110}, // helper that called setsid (erl_child_setup)
+		{pid: 111, ppid: 110, pgid: 111}, // its child, another new group (esbuild)
+		{pid: 200, ppid: 50, pgid: 200},  // app "api"
+		{pid: 210, ppid: 200, pgid: 200}, // api's child in its group
+		{pid: 300, ppid: 1, pgid: 300},   // unrelated
+		{pid: 400, ppid: 401, pgid: 400}, // pid-reuse cycle, unrelated
+		{pid: 401, ppid: 400, pgid: 401},
+	}
+	got := map[int]int{}
+	for i, o := range owners(procs, map[int]bool{100: true, 200: true}) {
+		got[procs[i].pid] = o
+	}
+	want := map[int]int{100: 100, 110: 100, 111: 100, 200: 200, 210: 200}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("owners = %v, want %v", got, want)
 	}
 }
 
@@ -29,7 +52,7 @@ func TestParseProcStat(t *testing.T) {
 	if !ok {
 		t.Fatal("parse failed")
 	}
-	want := procStat{pgrp: 4200, ticks: 300, rssPages: 777}
+	want := procStat{ppid: 1, pgrp: 4200, ticks: 300, rssPages: 777}
 	if got != want {
 		t.Errorf("parseProcStat = %+v, want %+v", got, want)
 	}

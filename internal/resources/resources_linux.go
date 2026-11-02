@@ -10,7 +10,8 @@ import (
 // it exactly needs sysconf(_SC_CLK_TCK) via cgo, which h2ams avoids.
 const clockTicks = 100
 
-// sample reads /proc directly, summing every process in each wanted group.
+// sample reads /proc directly, summing every process that belongs to each
+// wanted group (see owners).
 func (s *Sampler) sample(pgids []int) (map[int]Usage, error) {
 	want := make(map[int]bool, len(pgids))
 	for _, id := range pgids {
@@ -21,24 +22,27 @@ func (s *Sampler) sample(pgids []int) (map[int]Usage, error) {
 		return nil, err
 	}
 	page := uint64(os.Getpagesize())
-	ticks := make(map[int]uint64)
-	out := make(map[int]Usage)
+	var procs []proc
 	for _, e := range entries {
-		if _, err := strconv.Atoi(e.Name()); err != nil {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join("/proc", e.Name(), "stat"))
 		if err != nil {
 			continue // exited
 		}
-		st, ok := parseProcStat(string(data))
-		if !ok || !want[st.pgrp] {
-			continue
+		if st, ok := parseProcStat(string(data)); ok {
+			procs = append(procs, proc{pid: pid, ppid: st.ppid, pgid: st.pgrp, rssBytes: st.rssPages * page, ticks: st.ticks})
 		}
-		u := out[st.pgrp]
-		u.MemoryBytes += st.rssPages * page
-		out[st.pgrp] = u
-		ticks[st.pgrp] += st.ticks
+	}
+	ticks := make(map[int]uint64)
+	out := make(map[int]Usage)
+	for i, owner := range owners(procs, want) {
+		u := out[owner]
+		u.MemoryBytes += procs[i].rssBytes
+		out[owner] = u
+		ticks[owner] += procs[i].ticks
 	}
 
 	now := s.now()

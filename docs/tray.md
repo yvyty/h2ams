@@ -8,7 +8,7 @@ start, stop, and switch their environments.
 | --- | --- |
 | Grey | Nothing is running. |
 | Green | Every app in every running project is running. |
-| Amber | Something is starting, restarting, or stopped. |
+| Amber | Something is starting, restarting, or stopped. A `completed` one-shot job counts as healthy. |
 | Red | An app has failed. |
 
 The menu lists every project h2ams has run (found through the `project.json`

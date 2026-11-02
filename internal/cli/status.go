@@ -30,7 +30,9 @@ States:
   starting    launched, not yet confirmed running
   running     up and supervised
   restarting  exited and waiting (with backoff) to be started again
-  stopped     exited cleanly, or stopped by "h2ams down"
+  completed   exited successfully and its restart policy doesn't restart it
+              (a one-shot job such as a build)
+  stopped     stopped by "h2ams stop" or "h2ams down"
   failed      crashed and will not be restarted (policy or max_attempts)
 
 CPU is percent of one core and MEM is resident memory, both summed over the

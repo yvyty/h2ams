@@ -48,7 +48,7 @@ func (m *Manager) Start(specs []Spec) error {
 	return nil
 }
 
-// StartApp starts an app that is stopped or failed. The restart count starts
+// StartApp starts an app that is stopped, completed, or failed. The restart count starts
 // over, since this is a deliberate start rather than a crash recovery.
 func (m *Manager) StartApp(name string) error {
 	m.actions.Lock()
