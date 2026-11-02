@@ -47,6 +47,9 @@ type Spec struct {
 	StopTimeout time.Duration
 
 	Stdout, Stderr io.Writer // nil discards output
+	// Events receives one timestamped line per lifecycle change (start, exit,
+	// restart, stop). Usually the same writer as Stdout; nil disables them.
+	Events io.Writer
 }
 
 // Status is a snapshot of a process, safe to serialize.
@@ -113,6 +116,7 @@ func (p *Process) supervise() {
 		exitErr, stopped := p.runOnce()
 		if stopped {
 			p.settle(StateStopped, nil)
+			p.event("stopped")
 			return
 		}
 		if time.Since(started) >= p.spec.StableAfter {
@@ -123,26 +127,32 @@ func (p *Process) supervise() {
 		if !p.shouldRestart(failed) {
 			if failed {
 				p.settle(StateFailed, exitErr)
+				p.event("failed; restart policy is %s", p.spec.Policy)
 			} else {
 				p.settle(StateStopped, nil)
 			}
 			return
 		}
 		if attempts >= p.spec.MaxAttempts {
-			p.settle(StateFailed, fmt.Errorf("gave up after %d restarts: %w", attempts, lastErr(exitErr)))
+			err := fmt.Errorf("gave up after %d restarts: %w", attempts, lastErr(exitErr))
+			p.settle(StateFailed, err)
+			p.event("%v", err)
 			return
 		}
 
 		attempts++
+		delay := backoffFor(p.spec.Backoff, attempts)
+		p.event("restarting in %v (attempt %d of %d)", delay, attempts, p.spec.MaxAttempts)
 		p.update(func(s *Status) {
 			s.State = StateRestarting
 			s.PID = 0
 			s.Restarts++
 		})
 		select {
-		case <-time.After(backoffFor(p.spec.Backoff, attempts)):
+		case <-time.After(delay):
 		case <-p.stop:
 			p.settle(StateStopped, nil)
+			p.event("stopped")
 			return
 		}
 	}
@@ -159,9 +169,11 @@ func (p *Process) runOnce() (exitErr error, stopped bool) {
 
 	if err := cmd.Start(); err != nil {
 		p.recordExit(-1, err)
+		p.event("failed to start: %v", err)
 		return err, false
 	}
 	pid := cmd.Process.Pid
+	p.event("started (pid %d)", pid)
 	p.update(func(s *Status) {
 		s.State = StateRunning
 		s.PID = pid
@@ -177,6 +189,7 @@ func (p *Process) runOnce() (exitErr error, stopped bool) {
 	case err := <-waitErr:
 		killGroup(pid) // reap anything the command left behind in its group
 		p.recordExit(exitCode(err), err)
+		p.event("exited: %v", describeExit(err))
 		return err, false
 	case <-p.stop:
 		p.terminate(pid, waitErr)
@@ -226,6 +239,21 @@ func (p *Process) settle(state State, err error) {
 			s.Error = err.Error()
 		}
 	})
+}
+
+func (p *Process) event(format string, args ...any) {
+	if p.spec.Events == nil {
+		return
+	}
+	fmt.Fprintf(p.spec.Events, "[h2ams %s] %s: %s\n",
+		time.Now().Format(time.RFC3339), p.spec.Name, fmt.Sprintf(format, args...))
+}
+
+func describeExit(err error) string {
+	if err == nil {
+		return "exit status 0"
+	}
+	return err.Error()
 }
 
 func (p *Process) update(fn func(*Status)) {

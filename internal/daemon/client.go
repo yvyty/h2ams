@@ -23,11 +23,17 @@ type Request struct {
 
 // Response is the daemon's reply.
 type Response struct {
-	Error       string           `json:"error,omitempty"`
-	PID         int              `json:"pid,omitempty"`
-	ConfigPath  string           `json:"config_path,omitempty"`
-	Environment string           `json:"environment,omitempty"`
-	Apps        []process.Status `json:"apps,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	PID         int         `json:"pid,omitempty"`
+	ConfigPath  string      `json:"config_path,omitempty"`
+	Environment string      `json:"environment,omitempty"`
+	Apps        []AppStatus `json:"apps,omitempty"`
+}
+
+// AppStatus is a process status plus the TCP ports its process group listens on.
+type AppStatus struct {
+	process.Status
+	Ports []int `json:"ports,omitempty"`
 }
 
 // ErrNotRunning means no daemon is listening on the socket.

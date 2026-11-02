@@ -40,6 +40,19 @@ func TestInitCreatesValidConfig(t *testing.T) {
 	}
 }
 
+func TestInitHonorsConfigFlag(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := runInit(t, dir, "--config", "dev.yml"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, err := config.Load(filepath.Join(dir, "dev.yml")); err != nil {
+		t.Fatalf("dev.yml invalid or missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, config.DefaultFileName)); !os.IsNotExist(err) {
+		t.Errorf("default file should not be created, stat err = %v", err)
+	}
+}
+
 func TestInitDoesNotOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, config.DefaultFileName)

@@ -6,6 +6,7 @@ package testutil
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -28,6 +29,8 @@ const (
 	WriteCwd   = "write-cwd"   // write working directory to out file, then sleep
 	WritePID   = "write-pid"   // write own PID to out file, then sleep
 	IgnoreTerm = "ignore-term" // ignore SIGTERM, then sleep
+	Listen     = "listen"      // listen on a free TCP port, write it to out file, then sleep
+	Print      = "print"       // print $H2AMS_TEST_OUT to stdout and stderr, then sleep
 )
 
 // RunHelperIfRequested must be called first in TestMain. In helper mode it
@@ -56,6 +59,17 @@ func RunHelperIfRequested() {
 	case IgnoreTerm:
 		signal.Ignore(syscall.SIGTERM)
 		writeAtomic(out, "ready")
+	case Listen:
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		defer ln.Close()
+		writeAtomic(out, strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
+	case Print:
+		fmt.Fprintln(os.Stdout, out)
+		fmt.Fprintln(os.Stderr, out+" (stderr)")
 	case Sleep:
 	default:
 		fmt.Fprintf(os.Stderr, "unknown helper mode %q\n", mode)

@@ -1,0 +1,49 @@
+# Example h2ams.yml for a typical full-stack project:
+#
+#   my-project/
+#   ├── h2ams.yml
+#   ├── api/       (Go API on :8080)
+#   ├── web/       (Vite frontend on :5173)
+#   └── worker/    (Python background worker)
+#
+# Start everything in "dev" with:  h2ams up
+# Start only the API in "backend": h2ams up --env backend
+
+version: 1
+
+# Used by "h2ams up" when --env is not given. Without it, up starts every app.
+default_environment: dev
+
+environments:
+  dev:
+    apps: [api, web, worker]
+  backend:
+    apps: [api, worker]
+
+apps:
+  api:
+    command: go run ./cmd/api
+    cwd: ./api              # relative to this file
+    env:
+      PORT: "8080"
+      DATABASE_URL: postgres://localhost:5432/app_dev
+    restart:
+      policy: on-failure    # restart only when it crashes (non-zero exit)
+      max_attempts: 5       # give up and mark "failed" after 5 restarts in a row
+      backoff: 1s           # wait 1s, 2s, 4s, ... (max 30s) between restarts
+
+  web:
+    command: npm run dev
+    cwd: ./web
+    restart:
+      policy: always        # restart even after a clean exit
+
+  worker:
+    command: python -m worker
+    cwd: ./worker
+    env:
+      PYTHONUNBUFFERED: "1" # otherwise Python buffers output and logs lag
+    restart:
+      policy: on-failure
+      max_attempts: 10
+      backoff: 2s

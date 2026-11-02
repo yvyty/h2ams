@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/yvyty/h2ams/internal/config"
+	"github.com/yvyty/h2ams/internal/logs"
+	"github.com/yvyty/h2ams/internal/ports"
 	"github.com/yvyty/h2ams/internal/process"
 )
 
@@ -25,7 +27,6 @@ type Options struct {
 	ConfigPath  string
 	Environment string // empty uses the config's default environment
 	Paths       Paths
-	AppOutput   io.Writer // where app stdout/stderr go; nil discards
 }
 
 // Run starts the configured apps and serves requests until ctx is canceled or
@@ -43,7 +44,6 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	specs := Specs(cfg, filepath.Dir(configPath), names, opts.AppOutput)
 
 	if err := os.MkdirAll(opts.Paths.Dir, 0o700); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
@@ -52,6 +52,14 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+
+	logFiles, err := openLogs(opts.Paths, names)
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	defer closeAll(logFiles)
+	specs := Specs(cfg, filepath.Dir(configPath), names, func(app string) io.Writer { return logFiles[app] })
 
 	mgr := process.NewManager()
 	if err := mgr.Start(specs); err != nil {
@@ -85,12 +93,38 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
+// openLogs opens (and rotates if needed) one append-only log per app. The
+// files persist across restarts, so output survives an app crash.
+func openLogs(paths Paths, names []string) (map[string]*os.File, error) {
+	files := make(map[string]*os.File, len(names))
+	for _, name := range names {
+		f, err := logs.Open(paths.AppLog(name))
+		if err != nil {
+			closeAll(files)
+			return nil, fmt.Errorf("opening log for %s: %w", name, err)
+		}
+		files[name] = f
+	}
+	return files, nil
+}
+
+func closeAll(files map[string]*os.File) {
+	for _, f := range files {
+		f.Close()
+	}
+}
+
 // Specs turns config apps into process specs. Relative cwds resolve against
-// baseDir (the config file's directory).
-func Specs(cfg *config.Config, baseDir string, names []string, out io.Writer) []process.Spec {
+// baseDir (the config file's directory). output returns where each app's
+// stdout, stderr, and lifecycle events go; nil discards them.
+func Specs(cfg *config.Config, baseDir string, names []string, output func(app string) io.Writer) []process.Spec {
 	specs := make([]process.Spec, 0, len(names))
 	for _, name := range names {
 		app := cfg.Apps[name]
+		var out io.Writer
+		if output != nil {
+			out = output(name)
+		}
 		dir := app.Cwd
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(baseDir, dir)
@@ -105,6 +139,7 @@ func Specs(cfg *config.Config, baseDir string, names []string, out io.Writer) []
 			Backoff:     time.Duration(app.Restart.Backoff),
 			Stdout:      out,
 			Stderr:      out,
+			Events:      out,
 		})
 	}
 	return specs
@@ -178,13 +213,35 @@ func (s *server) handle(conn net.Conn) {
 
 	switch req.Cmd {
 	case CmdStatus:
-		resp.Apps = s.mgr.Statuses()
+		resp.Apps = withPorts(s.mgr.Statuses())
 	case CmdDown:
 		s.downOnce.Do(s.mgr.StopAll)
-		resp.Apps = s.mgr.Statuses()
+		resp.Apps = withPorts(s.mgr.Statuses())
 		defer s.cancel() // shut down after the reply is written
 	default:
 		resp.Error = fmt.Sprintf("unknown command %q", req.Cmd)
 	}
 	_ = json.NewEncoder(conn).Encode(resp)
+}
+
+// withPorts attaches listening ports to running apps. Each app leads its own
+// process group, so its PID is also the group ID covering any children.
+// Detection is best-effort: on failure apps are reported without ports.
+func withPorts(statuses []process.Status) []AppStatus {
+	var pgids []int
+	for _, st := range statuses {
+		if st.State == process.StateRunning && st.PID != 0 {
+			pgids = append(pgids, st.PID)
+		}
+	}
+	found, _ := ports.Listening(pgids)
+
+	apps := make([]AppStatus, len(statuses))
+	for i, st := range statuses {
+		apps[i] = AppStatus{Status: st}
+		if st.State == process.StateRunning {
+			apps[i].Ports = found[st.PID]
+		}
+	}
+	return apps
 }

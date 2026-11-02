@@ -79,6 +79,13 @@ func TestParseErrors(t *testing.T) {
 			[]string{`environments.dev.apps: unknown app "ghost"`},
 		},
 		{"unknown default environment", "version: 1\ndefault_environment: prod\napps:\n  a:\n    command: x\n", []string{`default_environment: unknown environment "prod"`}},
+		{"unsafe app name", "version: 1\napps:\n  ../evil:\n    command: x\n", []string{"apps.../evil: name must start"}},
+		{"app name with space", "version: 1\napps:\n  \"my app\":\n    command: x\n", []string{"apps.my app: name must start"}},
+		{
+			"unsafe environment name",
+			"version: 1\nenvironments:\n  \"dev/x\":\n    apps: [a]\napps:\n  a:\n    command: x\n",
+			[]string{"environments.dev/x: name must start"},
+		},
 		{
 			"reports all problems",
 			"version: 2\napps:\n  a:\n    restart:\n      policy: bad\n",
@@ -119,6 +126,18 @@ func TestLoad(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.yml")); err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+// TestExampleConfig keeps the documented example in sync with the schema.
+func TestExampleConfig(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "examples", DefaultFileName))
+	if err != nil {
+		t.Fatalf("examples/%s: %v", DefaultFileName, err)
+	}
+	apps, err := cfg.AppsFor("backend")
+	if err != nil || strings.Join(apps, ",") != "api,worker" {
+		t.Errorf("backend apps = %v, %v", apps, err)
 	}
 }
 

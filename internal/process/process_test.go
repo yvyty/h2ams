@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,6 +199,41 @@ func TestStableRunResetsAttempts(t *testing.T) {
 
 	if !testutil.WaitFor(timeout, func() bool { return p.Status().Restarts >= 3 }) {
 		t.Fatalf("expected restarts to continue past max_attempts, got %+v", p.Status())
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func TestEventsAreLogged(t *testing.T) {
+	var events syncBuffer
+	s := spec(testutil.CrashOnce, filepath.Join(t.TempDir(), "marker"))
+	s.Events = &events
+	p := Start(s)
+	if !testutil.WaitFor(timeout, func() bool { return p.Status().Restarts == 1 && p.Status().State == StateRunning }) {
+		t.Fatalf("never restarted: %+v", p.Status())
+	}
+	p.Stop()
+
+	log := events.String()
+	for _, want := range []string{"app: started (pid", "app: exited: exit status 1", "app: restarting in 10ms (attempt 1 of 3)", "app: stopped"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("events missing %q:\n%s", want, log)
+		}
 	}
 }
 

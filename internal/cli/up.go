@@ -23,8 +23,14 @@ func newUpCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Start the daemon and every app in an environment",
-		Long: "Start the h2ams daemon in the background and launch every app in the\n" +
-			"environment (default: the config's default_environment, or all apps).",
+		Long: "Validate the config, start the h2ams daemon in the background, and launch\n" +
+			"every app in the environment. Without --env, up uses default_environment\n" +
+			"from the config, or every app if none is set.\n\n" +
+			"The daemon keeps running after this command returns. It restarts apps\n" +
+			"according to their restart policy until you run \"h2ams down\".",
+		Example: "  h2ams up\n" +
+			"  h2ams up --env dev\n" +
+			"  h2ams up --config path/to/h2ams.yml",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfgPath, paths, err := opts.resolve()
@@ -128,7 +134,6 @@ func newDaemonCmd(opts *rootOptions) *cobra.Command {
 				ConfigPath:  cfgPath,
 				Environment: env,
 				Paths:       paths,
-				AppOutput:   log,
 			})
 			fmt.Fprintf(log, "%s daemon stopped\n", time.Now().Format(time.RFC3339))
 			return err

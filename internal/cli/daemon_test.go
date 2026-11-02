@@ -15,17 +15,6 @@ import (
 	"github.com/yvyty/h2ams/internal/process"
 )
 
-func run(t *testing.T, args ...string) (string, error) {
-	t.Helper()
-	cmd := NewRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs(args)
-	err := cmd.Execute()
-	return out.String(), err
-}
-
 func TestStatusAndDownWhenNotRunning(t *testing.T) {
 	t.Setenv(daemon.StateDirEnv, t.TempDir())
 	cfg := filepath.Join(t.TempDir(), "h2ams.yml")
@@ -47,12 +36,12 @@ func TestUpRejectsInvalidConfig(t *testing.T) {
 
 func TestPrintStatus(t *testing.T) {
 	var b bytes.Buffer
-	printStatus(&b, daemon.Response{Apps: []process.Status{
-		{Name: "api", State: process.StateRunning, PID: 42, StartedAt: time.Now().Add(-3 * time.Second)},
-		{Name: "web", State: process.StateFailed, Restarts: 5, Error: "gave up"},
+	printStatus(&b, daemon.Response{Apps: []daemon.AppStatus{
+		{Status: process.Status{Name: "api", State: process.StateRunning, PID: 42, StartedAt: time.Now().Add(-3 * time.Second)}, Ports: []int{8080, 8443}},
+		{Status: process.Status{Name: "web", State: process.StateFailed, Restarts: 5, Error: "gave up"}},
 	}})
 	out := b.String()
-	for _, want := range []string{"APP", "api", "running", "42", "3s", "web", "failed", "gave up"} {
+	for _, want := range []string{"APP", "PORTS", "api", "running", "42", "8080,8443", "3s", "web", "failed", "gave up"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -75,7 +64,7 @@ func TestBinaryUpStatusDown(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	cfg := filepath.Join(work, "h2ams.yml")
-	os.WriteFile(cfg, []byte("version: 1\napps:\n  sleeper:\n    command: sleep 60\n"), 0o644)
+	os.WriteFile(cfg, []byte("version: 1\napps:\n  sleeper:\n    command: echo hello-from-app; sleep 60\n"), 0o644)
 
 	h2ams := func(args ...string) string {
 		t.Helper()
@@ -105,10 +94,38 @@ func TestBinaryUpStatusDown(t *testing.T) {
 		t.Fatalf("status never showed sleeper running:\n%s", out)
 	}
 
+	if out := h2ams("logs", "sleeper"); !strings.Contains(out, "hello-from-app") || !strings.Contains(out, "sleeper: started") {
+		t.Fatalf("logs output:\n%s", out)
+	}
+
 	if out := h2ams("down"); !strings.Contains(out, "Stopped 1 app") {
 		t.Fatalf("down output:\n%s", out)
 	}
 	if out := h2ams("status"); !strings.Contains(out, "not running") {
 		t.Fatalf("status after down:\n%s", out)
+	}
+	if out := h2ams("logs", "sleeper"); !strings.Contains(out, "hello-from-app") || !strings.Contains(out, "sleeper: stopped") {
+		t.Fatalf("logs after down:\n%s", out)
+	}
+}
+
+func TestLogsCommand(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv(daemon.StateDirEnv, stateDir)
+	cfg := filepath.Join(t.TempDir(), "h2ams.yml")
+	os.WriteFile(cfg, []byte("version: 1\napps:\n  api:\n    command: x\n"), 0o644)
+
+	if _, err := run(t, "logs", "ghost", "--config", cfg); err == nil || !strings.Contains(err.Error(), `unknown app "ghost"`) {
+		t.Errorf("unknown app: err = %v", err)
+	}
+	if out, err := run(t, "logs", "api", "--config", cfg); err != nil || !strings.Contains(out, "no logs yet") {
+		t.Errorf("missing log: out=%q err=%v", out, err)
+	}
+
+	paths, _ := daemon.PathsFor(cfg)
+	os.MkdirAll(paths.LogDir, 0o700)
+	os.WriteFile(paths.AppLog("api"), []byte("l1\nl2\nl3\n"), 0o600)
+	if out, err := run(t, "logs", "api", "-n", "2", "--config", cfg); err != nil || out != "l2\nl3\n" {
+		t.Errorf("logs -n 2: out=%q err=%v", out, err)
 	}
 }

@@ -18,7 +18,8 @@ const StateDirEnv = "H2AMS_STATE_DIR"
 type Paths struct {
 	Dir    string
 	Socket string
-	Log    string
+	Log    string // the daemon's own log
+	LogDir string // one <app>.log per app
 }
 
 // PathsFor returns the state paths for the daemon managing configPath.
@@ -45,5 +46,12 @@ func NewPaths(dir string) Paths {
 		Dir:    dir,
 		Socket: filepath.Join(dir, "h2ams.sock"),
 		Log:    filepath.Join(dir, "daemon.log"),
+		LogDir: filepath.Join(dir, "logs"),
 	}
+}
+
+// AppLog returns the log file for app. App names are validated by config to
+// be safe as file names.
+func (p Paths) AppLog(app string) string {
+	return filepath.Join(p.LogDir, app+".log")
 }

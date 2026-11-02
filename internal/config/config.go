@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -132,6 +133,10 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// validName limits app and environment names to characters that are safe in
+// file names (each app gets its own log file).
+var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 // ValidationError lists every problem found in a config.
 type ValidationError struct {
 	Problems []string
@@ -155,6 +160,9 @@ func (c *Config) Validate() error {
 
 	for _, name := range sortedKeys(c.Apps) {
 		app := c.Apps[name]
+		if !validName.MatchString(name) {
+			add("apps.%s: name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'", name)
+		}
 		if strings.TrimSpace(app.Command) == "" {
 			add("apps.%s.command: required", name)
 		}
@@ -173,6 +181,9 @@ func (c *Config) Validate() error {
 
 	for _, envName := range sortedKeys(c.Environments) {
 		env := c.Environments[envName]
+		if !validName.MatchString(envName) {
+			add("environments.%s: name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'", envName)
+		}
 		if len(env.Apps) == 0 {
 			add("environments.%s.apps: at least one app is required", envName)
 		}

@@ -137,6 +137,71 @@ func TestContextCancelStopsApps(t *testing.T) {
 	}
 }
 
+func TestStatusReportsPorts(t *testing.T) {
+	dir := shortTempDir(t)
+	out := filepath.Join(dir, "port")
+	cfgPath := writeConfig(t, dir, map[string]string{"web": testutil.Command(testutil.Listen, out)})
+	opts := Options{ConfigPath: cfgPath, Paths: NewPaths(filepath.Join(dir, "state"))}
+	errCh := startDaemon(t, opts)
+	defer func() {
+		Call(opts.Paths.Socket, Request{Cmd: CmdDown}, timeout)
+		<-errCh
+	}()
+
+	raw, ok := testutil.ReadFile(out, timeout)
+	if !ok {
+		t.Fatal("app never reported its port")
+	}
+	var want int
+	fmt.Sscan(raw, &want)
+
+	var resp Response
+	if !testutil.WaitFor(timeout, func() bool {
+		resp, _ = Call(opts.Paths.Socket, Request{Cmd: CmdStatus}, timeout)
+		return len(resp.Apps) == 1 && slices.Contains(resp.Apps[0].Ports, want)
+	}) {
+		t.Fatalf("status never showed port %d: %+v", want, resp.Apps)
+	}
+}
+
+func TestLogsSurviveRestart(t *testing.T) {
+	dir := shortTempDir(t)
+	cfgPath := filepath.Join(dir, config.DefaultFileName)
+	os.WriteFile(cfgPath, []byte(`version: 1
+apps:
+  flaky:
+    command: echo out-line; echo err-line >&2; exit 1
+    restart:
+      max_attempts: 1
+      backoff: 10ms
+`), 0o644)
+	paths := NewPaths(filepath.Join(dir, "state"))
+	errCh := startDaemon(t, Options{ConfigPath: cfgPath, Paths: paths})
+
+	if !testutil.WaitFor(timeout, func() bool {
+		resp, _ := Call(paths.Socket, Request{Cmd: CmdStatus}, timeout)
+		return len(resp.Apps) == 1 && resp.Apps[0].State == process.StateFailed
+	}) {
+		t.Fatal("app never reached failed")
+	}
+	Call(paths.Socket, Request{Cmd: CmdDown}, timeout)
+	<-errCh
+
+	data, err := os.ReadFile(paths.AppLog("flaky"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	for _, want := range []string{"flaky: started", "flaky: restarting in", "flaky: gave up after 1 restarts"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log missing %q:\n%s", want, log)
+		}
+	}
+	if strings.Count(log, "out-line") != 2 || strings.Count(log, "err-line") != 2 {
+		t.Errorf("expected stdout and stderr from both runs:\n%s", log)
+	}
+}
+
 func TestStaleSocketIsReplaced(t *testing.T) {
 	dir := shortTempDir(t)
 	cfgPath := writeConfig(t, dir, map[string]string{"a": testutil.Command(testutil.Sleep, "")})
