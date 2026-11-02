@@ -326,7 +326,8 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestSpecs(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
+	base, abs := t.TempDir(), t.TempDir() // absolute on every OS
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 version: 1
 apps:
   rel:
@@ -335,15 +336,15 @@ apps:
     env: {FOO: bar}
   abs:
     command: run
-    cwd: /tmp
+    cwd: %q
   none:
     command: run
-`))
+`, abs)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs := Specs(cfg, "/base", "proj", []string{"rel", "abs", "none"}, nil)
-	wantDirs := []string{"/base/sub", "/tmp", "/base"}
+	specs := Specs(cfg, base, "proj", []string{"rel", "abs", "none"}, nil)
+	wantDirs := []string{filepath.Join(base, "sub"), abs, base}
 	for i, s := range specs {
 		if s.Dir != wantDirs[i] {
 			t.Errorf("%s dir = %q, want %q", s.Name, s.Dir, wantDirs[i])
@@ -362,7 +363,7 @@ func TestPathsForIsStablePerConfig(t *testing.T) {
 	a, _ := PathsFor("/proj/a/h2ams.yml")
 	a2, _ := PathsFor("/proj/a/h2ams.yml")
 	b, _ := PathsFor("/proj/b/h2ams.yml")
-	if a != a2 || a == b || filepath.Dir(a.Dir) != "/state" {
+	if a != a2 || a == b || filepath.Dir(a.Dir) != filepath.FromSlash("/state") {
 		t.Errorf("paths a=%+v a2=%+v b=%+v", a, a2, b)
 	}
 }

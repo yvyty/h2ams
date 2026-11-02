@@ -15,6 +15,8 @@ func TestWindowsQuote(t *testing.T) {
 		`say "hi"`:         `"say \"hi\""`,
 		`trailing\ x\`:     `"trailing\ x\\"`,
 		`a\"b c`:           `"a\\\"b c"`,
+		`q"uote`:           `q\"uote`,
+		`back\slash`:       `back\slash`,
 	} {
 		if got := windowsQuote(in); got != want {
 			t.Errorf("windowsQuote(%q) = %s, want %s", in, got, want)

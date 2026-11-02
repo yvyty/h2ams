@@ -80,7 +80,7 @@ func TestLoad(t *testing.T) {
 		{ConfigPath: broken, Paths: daemon.NewPaths("/s/broken")},
 	}
 	status := func(socket string) (daemon.Response, error) {
-		if socket == "/s/shop/h2ams.sock" {
+		if socket == daemon.NewPaths("/s/shop").Socket {
 			return daemon.Response{Environment: "testing", Dashboard: "http://127.0.0.1:9999", Apps: []daemon.AppStatus{app("a", process.StateRunning)}}, nil
 		}
 		return daemon.Response{}, daemon.ErrNotRunning

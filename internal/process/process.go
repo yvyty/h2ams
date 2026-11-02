@@ -224,8 +224,16 @@ func (p *Process) runOnce() (exitErr error, stopped bool) {
 // single command, so the leader is a shell that dies on SIGTERM at once while
 // the real app is still shutting down. The rest of the group gets whatever is
 // left of the grace period before it is killed.
+//
+// When the platform cannot ask the app to stop at all (taskkill refuses to
+// close console programs without /F on Windows), it is killed right away
+// instead of waiting out a grace period nothing can use.
 func (p *Process) terminate(pid int, waitErr <-chan error) {
-	terminateGroup(pid)
+	if !terminateGroup(pid) {
+		killGroup(pid)
+		<-waitErr
+		return
+	}
 	deadline := time.NewTimer(p.spec.StopTimeout)
 	defer deadline.Stop()
 	select {

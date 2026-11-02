@@ -112,36 +112,50 @@ func shellLineWindows(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// windowsQuote quotes s for CommandLineToArgvW (as syscall.EscapeArg does,
-// but available on every platform so it can be tested anywhere).
+// windowsQuote quotes s for CommandLineToArgvW. It is a copy of
+// syscall.EscapeArg (Windows-only), so it can be tested on every platform.
 func windowsQuote(s string) string {
 	if s == "" {
 		return `""`
 	}
-	if !strings.ContainsAny(s, " \t\"") {
-		return s
-	}
-	var b strings.Builder
-	b.WriteByte('"')
-	slashes := 0 // backslashes written just before the current position
+	needsBackslash, hasSpace := false, false
 	for i := 0; i < len(s); i++ {
-		switch c := s[i]; c {
-		case '\\':
-			slashes++
-			b.WriteByte(c)
-		case '"':
-			// The preceding backslashes are literal only if doubled, and the
-			// quote itself needs one more backslash.
-			b.WriteString(strings.Repeat(`\`, slashes+1))
-			b.WriteByte(c)
-			slashes = 0
-		default:
-			slashes = 0
-			b.WriteByte(c)
+		switch s[i] {
+		case '"', '\\':
+			needsBackslash = true
+		case ' ', '\t':
+			hasSpace = true
 		}
 	}
-	b.WriteString(strings.Repeat(`\`, slashes)) // so the closing quote isn't escaped
-	b.WriteByte('"')
+	if !needsBackslash && !hasSpace {
+		return s
+	}
+	if !needsBackslash {
+		return `"` + s + `"`
+	}
+	var b strings.Builder
+	if hasSpace {
+		b.WriteByte('"')
+	}
+	slashes := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		default:
+			slashes = 0
+		case '\\':
+			slashes++
+		case '"':
+			// Double the backslashes before a quote, then escape the quote.
+			b.WriteString(strings.Repeat(`\`, slashes+1))
+			slashes = 0
+		}
+		b.WriteByte(c)
+	}
+	if hasSpace {
+		b.WriteString(strings.Repeat(`\`, slashes)) // so the closing quote isn't escaped
+		b.WriteByte('"')
+	}
 	return b.String()
 }
 

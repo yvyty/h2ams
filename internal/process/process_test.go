@@ -350,3 +350,21 @@ func TestPrecheckFailureIsNotRetried(t *testing.T) {
 		t.Error("command ran despite the failed precheck")
 	}
 }
+
+// TestStopIsPrompt: a plain app must not sit out the whole grace period. On
+// Windows, taskkill can't ask a console program to close, so h2ams has to
+// kill it at once instead of waiting.
+func TestStopIsPrompt(t *testing.T) {
+	s := spec(testutil.Sleep, "")
+	s.StopTimeout = 10 * time.Second
+	p := Start(s)
+	waitState(t, p, StateRunning)
+	start := time.Now()
+	p.Stop()
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("Stop took %v; it waited for the grace period instead of stopping the app", elapsed)
+	}
+	if st := p.Status(); st.State != StateStopped {
+		t.Errorf("state = %s, want stopped", st.State)
+	}
+}

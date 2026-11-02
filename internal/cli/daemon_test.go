@@ -193,7 +193,13 @@ func TestBinaryUpStatusDown(t *testing.T) {
 		t.Fatalf("status never showed sleeper running:\n%s", out)
 	}
 
-	if out := h2ams("logs", "sleeper"); !strings.Contains(out, "hello-from-app") || !strings.Contains(out, "sleeper: started") {
+	for time.Now().Before(deadline) { // the app may not have printed yet
+		if out = h2ams("logs", "sleeper"); strings.Contains(out, "hello-from-app") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(out, "hello-from-app") || !strings.Contains(out, "sleeper: started") {
 		t.Fatalf("logs output:\n%s", out)
 	}
 

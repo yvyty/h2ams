@@ -22,9 +22,11 @@ func newShellCommand(command string) *exec.Cmd {
 	return cmd
 }
 
-// terminateGroup asks the process tree rooted at pid to close.
-func terminateGroup(pid int) {
-	_ = exec.Command("taskkill", "/T", "/PID", strconv.Itoa(pid)).Run()
+// terminateGroup asks the process tree rooted at pid to close (WM_CLOSE). It
+// reports false when taskkill refuses, which it does for console programs
+// (cmd.exe and most dev servers): they can only be stopped forcefully.
+func terminateGroup(pid int) bool {
+	return exec.Command("taskkill", "/T", "/PID", strconv.Itoa(pid)).Run() == nil
 }
 
 // groupAlive is always false on Windows: taskkill /T already waits for the

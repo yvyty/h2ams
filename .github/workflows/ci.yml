@@ -91,6 +91,34 @@ jobs:
             CGO_ENABLED=1 GOARCH=$arch go build -o /dev/null ./cmd/h2ams-tray
           done
 
+  tray-smoke:
+    name: tray smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      H2AMS_TEST_TRAY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install a virtual display and D-Bus (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb dbus
+      - name: Start the real tray (Linux, under xvfb and a session bus)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- go test -count=1 -run TrayBinarySmoke -v ./internal/tray/
+      - name: Start the real tray
+        if: runner.os != 'Linux'
+        run: go test -count=1 -run TrayBinarySmoke -v ./internal/tray/
+
   docker:
     name: real Docker (linux)
     # Pulls an image, so only on pushes to main.
