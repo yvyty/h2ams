@@ -79,7 +79,7 @@ homebrew_casks:
     repository:
       owner: yvyty
       name: homebrew-tap
-      token: '{{ index .Env "HOMEBREW_TAP_TOKEN" }}'
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}" # GoReleaser accepts only this exact form
     directory: Casks
     homepage: https://github.com/yvyty/h2ams
     description: Run and supervise all your local dev apps from one YAML file
