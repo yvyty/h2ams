@@ -41,6 +41,8 @@ jobs:
             codesign --verify --strict "$bin"
             echo "signed: $bin"
           done
+      - name: Show the generated Homebrew cask
+        run: cat dist/homebrew/Casks/h2ams.rb
       - name: List archives
         run: ls -l dist/*.tar.gz dist/*.zip dist/checksums.txt
       - uses: actions/upload-artifact@v4

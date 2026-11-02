@@ -62,12 +62,38 @@ archives:
       - goos: windows
         formats: [zip]
     files:
+      - LICENSE
       - README.md
       - CHANGELOG.md
       - docs/*.md
 
 checksum:
   name_template: checksums.txt
+
+# brew install --cask yvyty/tap/h2ams (macOS). Published only for final
+# releases, and only once the HOMEBREW_TAP_TOKEN secret exists: a
+# fine-grained token with Contents read/write on yvyty/homebrew-tap.
+homebrew_casks:
+  - name: h2ams
+    ids: [h2ams]
+    repository:
+      owner: yvyty
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    directory: Casks
+    homepage: https://github.com/yvyty/h2ams
+    description: Run and supervise all your local dev apps from one YAML file
+    license: MIT
+    # Both into the same bin, so "h2ams up" finds h2ams-tray next to it.
+    binaries: [h2ams, h2ams-tray]
+    skip_upload: '{{ if and (isEnvSet "HOMEBREW_TAP_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
+    hooks:
+      post:
+        # The binaries are ad-hoc signed, not notarized (Issue 4.2.2).
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/h2ams", "#{staged_path}/h2ams-tray"]
+          end
 
 changelog:
   use: github
