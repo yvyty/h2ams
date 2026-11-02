@@ -90,10 +90,9 @@ homebrew_casks:
     hooks:
       post:
         # The binaries are ad-hoc signed, not notarized (Issue 4.2.2).
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/h2ams", "#{staged_path}/h2ams-tray"]
-          end
+        # Casks are macOS-only, so no OS check is needed.
+        install_steps: |
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/h2ams", "{{ .StagedPath }}/h2ams-tray"]
 
 changelog:
   use: github
