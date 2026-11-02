@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -21,13 +20,9 @@ type Runner struct {
 // FindH2ams locates the h2ams binary: next to this executable first (the
 // usual install), then on PATH.
 func FindH2ams() (string, error) {
-	name := "h2ams"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
+	name := exeName("h2ams", runtime.GOOS)
 	if self, err := os.Executable(); err == nil {
-		sibling := filepath.Join(filepath.Dir(self), name)
-		if info, err := os.Stat(sibling); err == nil && !info.IsDir() {
+		if sibling, ok := siblingOf(self, name); ok {
 			return sibling, nil
 		}
 	}

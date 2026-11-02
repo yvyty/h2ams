@@ -108,10 +108,19 @@ func trayBinary() (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	name := "h2ams-tray"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+	return siblingOf(self, exeName("h2ams-tray", runtime.GOOS))
+}
+
+// exeName is the file name of the binary base on goos.
+func exeName(base, goos string) string {
+	if goos == "windows" {
+		return base + ".exe"
 	}
+	return base
+}
+
+// siblingOf returns the regular file name in the same directory as self.
+func siblingOf(self, name string) (string, bool) {
 	bin := filepath.Join(filepath.Dir(self), name)
 	if info, err := os.Stat(bin); err != nil || info.IsDir() {
 		return "", false
