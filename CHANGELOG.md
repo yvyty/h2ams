@@ -5,6 +5,14 @@ All notable changes to h2ams. The format follows
 [Semantic Versioning](https://semver.org/) as described in the
 [README](README.md#versioning).
 
+## [Unreleased]
+
+### Fixed
+- An app whose `cwd` doesn't exist (or isn't a directory) now fails at once
+  with "working directory … does not exist (check cwd in h2ams.yml)",
+  instead of restarting with the misleading
+  `fork/exec /bin/sh: no such file or directory`.
+
 ## [0.1.0] - 2026-11-02
 
 The first release.
@@ -54,4 +62,5 @@ The first release.
   programs can't be asked to close from outside); container apps get a
   `cmd.exe` command line.
 
+[Unreleased]: https://github.com/yvyty/h2ams/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/yvyty/h2ams/releases/tag/v0.1.0

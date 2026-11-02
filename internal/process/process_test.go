@@ -351,6 +351,39 @@ func TestPrecheckFailureIsNotRetried(t *testing.T) {
 	}
 }
 
+// A missing or non-directory cwd fails at once, names the directory, and
+// is not retried: restarting can't fix it.
+func TestMissingDirFailsClearly(t *testing.T) {
+	base := t.TempDir()
+	notDir := filepath.Join(base, "file")
+	if err := os.WriteFile(notDir, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ dir, want string }{
+		{filepath.Join(base, "api"), "does not exist"},
+		{notDir, "is not a directory"},
+	} {
+		out := filepath.Join(t.TempDir(), "ran")
+		s := spec(testutil.Listen, out)
+		s.Dir = tc.dir
+		s.Policy = config.RestartAlways
+		s.MaxAttempts = 5
+		p := Start(s)
+		select {
+		case <-p.Done():
+		case <-time.After(timeout):
+			t.Fatalf("%s: never settled: %+v", tc.dir, p.Status())
+		}
+		st := p.Status()
+		if st.State != StateFailed || st.Restarts != 0 || !strings.Contains(st.Error, tc.dir) || !strings.Contains(st.Error, tc.want) {
+			t.Errorf("%s: status = %+v, want failed with %q", tc.dir, st, tc.want)
+		}
+		if _, err := os.Stat(out); err == nil {
+			t.Errorf("%s: command ran", tc.dir)
+		}
+	}
+}
+
 // TestStopIsPrompt: a plain app must not sit out the whole grace period. On
 // Windows, taskkill can't ask a console program to close, so h2ams has to
 // kill it at once instead of waiting.

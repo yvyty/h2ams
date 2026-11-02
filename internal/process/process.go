@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -108,6 +110,25 @@ func (p *Process) Stop() {
 	<-p.done
 }
 
+// checkDir reports a missing working directory clearly. Otherwise the OS
+// error names the shell instead ("fork/exec /bin/sh: no such file or
+// directory"), which sends people looking in the wrong place.
+func checkDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("working directory %s does not exist (check cwd in h2ams.yml)", dir)
+	case err != nil:
+		return fmt.Errorf("working directory %s: %w", dir, err)
+	case !info.IsDir():
+		return fmt.Errorf("working directory %s is not a directory (check cwd in h2ams.yml)", dir)
+	}
+	return nil
+}
+
 // Done is closed once the process is stopped or has failed for good.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
@@ -122,6 +143,11 @@ func (p *Process) supervise() {
 	defer close(p.done)
 	attempts := 0
 	for {
+		if err := checkDir(p.spec.Dir); err != nil {
+			p.settle(StateFailed, err)
+			p.event("cannot start: %v", err)
+			return
+		}
 		if p.spec.Precheck != nil {
 			if err := p.spec.Precheck(); err != nil {
 				p.settle(StateFailed, err)
