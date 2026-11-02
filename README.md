@@ -224,7 +224,9 @@ and a plugin example.
 
 `h2ams-tray` shows a colored dot (grey, green, amber, red) for all your
 projects and a menu to start, stop, and switch environments. It is a
-separate binary; see [docs/tray.md](docs/tray.md).
+separate binary; install it next to `h2ams` and `h2ams up` starts it for
+you (one icon for every project). Use `h2ams up --no-tray` or
+`H2AMS_NO_TRAY=1` to skip it. See [docs/tray.md](docs/tray.md).
 
 ## Environments
 

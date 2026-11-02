@@ -39,14 +39,28 @@ notification with the error.
 ## Install
 
 `h2ams-tray` is a separate binary because tray support needs cgo on macOS,
-while `h2ams` itself stays cgo-free. It finds `h2ams` next to itself first,
-then on `PATH`, so install both into the same directory.
+while `h2ams` itself stays cgo-free. Install both into the same directory:
 
 ```sh
 go install github.com/yvyty/h2ams/cmd/h2ams@latest
 go install github.com/yvyty/h2ams/cmd/h2ams-tray@latest
-h2ams-tray &
 ```
+
+You don't need to start it yourself: `h2ams up` starts the `h2ams-tray`
+installed next to it, so the icon appears whenever h2ams is running. Only
+one tray runs at a time (it holds `tray.lock` in the state directory), and
+it serves every project, so `up` in a second project doesn't add a second
+icon. Quitting the tray leaves your apps running; the next `h2ams up` brings
+it back.
+
+`up` skips the tray when:
+
+- you pass `--no-tray` or set `H2AMS_NO_TRAY=1`;
+- you are connected over SSH;
+- on Linux, there is no graphical session (`DISPLAY` or `WAYLAND_DISPLAY`).
+
+You can also start it by hand with `h2ams-tray &`. Its output goes to
+`tray.log` in the state directory when `up` starts it.
 
 ### Building per platform
 
@@ -77,8 +91,10 @@ Drawing the icon and clicking the menu need a real desktop, so check them by
 hand before a release:
 
 1. Run `h2ams-tray`. A grey dot appears, and the menu says "nothing running".
-2. In a project, run `h2ams up`. Within 3 seconds the dot turns green and the
-   project shows "running" with its apps and ports.
+   Run `h2ams-tray` again: it exits at once and no second dot appears.
+2. Quit the tray. In a project, run `h2ams up`: it prints "h2ams-tray started
+   in the menu bar", the dot appears, and within 3 seconds it turns green with
+   the project "running" and its apps and ports.
 3. Kill one app's process so it restarts: the dot turns amber, then green.
 4. Make an app fail (for example `command: exit 1` with `max_attempts: 1`):
    the dot turns red and the title shows "1 failed".

@@ -14,12 +14,14 @@ import (
 
 	"github.com/yvyty/h2ams/internal/config"
 	"github.com/yvyty/h2ams/internal/daemon"
+	"github.com/yvyty/h2ams/internal/tray"
 )
 
 const readyTimeout = 5 * time.Second
 
 func newUpCmd(opts *rootOptions) *cobra.Command {
 	var env string
+	var noTray bool
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Start the daemon and every app in an environment",
@@ -27,7 +29,11 @@ func newUpCmd(opts *rootOptions) *cobra.Command {
 			"every app in the environment. Without --env, up uses default_environment\n" +
 			"from the config, or every app if none is set.\n\n" +
 			"The daemon keeps running after this command returns. It restarts apps\n" +
-			"according to their restart policy until you run \"h2ams down\".",
+			"according to their restart policy until you run \"h2ams down\".\n\n" +
+			"If h2ams-tray is installed next to h2ams, up also starts it (once for\n" +
+			"all projects) so the menu-bar icon shows while h2ams runs. Skip that\n" +
+			"with --no-tray or H2AMS_NO_TRAY=1; it is also skipped over SSH and on\n" +
+			"Linux without a graphical session.",
 		Example: "  h2ams up\n" +
 			"  h2ams up --env dev\n" +
 			"  h2ams up --config path/to/h2ams.yml",
@@ -57,12 +63,21 @@ func newUpCmd(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "h2ams started (pid %d, log %s)\n\n", resp.PID, paths.Log)
+			fmt.Fprintf(cmd.OutOrStdout(), "h2ams started (pid %d, log %s)\n", resp.PID, paths.Log)
+			if !noTray {
+				if started, err := tray.Autostart(detachAttr()); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "could not start h2ams-tray: %v\n", err)
+				} else if started {
+					fmt.Fprintln(cmd.OutOrStdout(), "h2ams-tray started in the menu bar")
+				}
+			}
+			fmt.Fprintln(cmd.OutOrStdout())
 			printStatus(cmd.OutOrStdout(), resp)
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&env, "env", "e", "", "environment to start")
+	cmd.Flags().BoolVar(&noTray, "no-tray", false, "don't start h2ams-tray")
 	return cmd
 }
 

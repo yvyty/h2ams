@@ -8,6 +8,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -31,6 +32,14 @@ func main() {
 		fmt.Println("h2ams-tray version", version)
 		return
 	}
+	release, err := tray.Lock()
+	if errors.Is(err, tray.ErrRunning) {
+		return // one tray serves every project; "h2ams up" may try to start another
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer release()
 	h2ams, err := tray.FindH2ams()
 	if err != nil {
 		log.Fatal(err)

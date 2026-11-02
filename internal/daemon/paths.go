@@ -37,6 +37,10 @@ func PathsFor(configPath string) (Paths, error) {
 }
 
 // stateBase is the directory holding one state directory per project.
+// StateBase is the directory that holds every project's state directory
+// (H2AMS_STATE_DIR, or the user cache dir's h2ams folder).
+func StateBase() (string, error) { return stateBase() }
+
 func stateBase() (string, error) {
 	if base := os.Getenv(StateDirEnv); base != "" {
 		return base, nil
