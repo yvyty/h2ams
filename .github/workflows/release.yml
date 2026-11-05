@@ -30,10 +30,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Optional: publishes the Homebrew cask (final releases only).
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Optional: Developer ID signing + notarization (see .goreleaser.yaml).
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
       - name: Verify macOS signatures
+        env:
+          NOTARIZED: ${{ secrets.MACOS_SIGN_P12 != '' }}
         run: |
           set -e
           for bin in dist/*darwin*/h2ams dist/*darwin*/h2ams-tray; do
             codesign --verify --strict "$bin"
-            echo "signed: $bin"
+            if [ "$NOTARIZED" = "true" ]; then
+              info=$(codesign -dvv "$bin" 2>&1)
+              echo "$info" | grep -q "Authority=Developer ID Application" \
+                || { echo "$bin is not Developer ID signed"; exit 1; }
+              echo "$info" | grep -q "(runtime)" \
+                || { echo "$bin lacks the hardened runtime"; exit 1; }
+              echo "developer-id signed: $bin"
+            else
+              echo "ad-hoc signed: $bin"
+            fi
           done

@@ -56,8 +56,14 @@ brew install --cask yvyty/tap/h2ams
 # macOS / Linux (example: macOS on Apple silicon)
 tar -xzf h2ams_<version>_darwin_arm64.tar.gz
 sudo mv h2ams h2ams-tray /usr/local/bin/
-# macOS only: the binaries are ad-hoc signed, not notarized, so clear the
-# download quarantine once (Homebrew does this for you)
+```
+
+On macOS, releases signed with a Developer ID and notarized by Apple run
+without any extra step. Releases that are only ad-hoc signed (0.1.1 and
+earlier) say so in their release notes; clear the download quarantine once
+for those (Homebrew does this for you):
+
+```sh
 xattr -d com.apple.quarantine /usr/local/bin/h2ams /usr/local/bin/h2ams-tray
 ```
 

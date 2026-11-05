@@ -23,7 +23,9 @@ builds:
       - -s -w -X github.com/yvyty/h2ams/internal/cli.Version={{ .Version }}
     hooks:
       post:
-        # Ad-hoc sign macOS binaries (decision recorded in Issue 4.2.2).
+        # Ad-hoc sign so snapshot builds run on macOS; on a release with the
+        # MACOS_SIGN_* secrets, the notarize step below re-signs them with
+        # the Developer ID certificate.
         - cmd: '{{ if eq .Os "darwin" }}codesign --force --sign - {{ .Path }}{{ else }}true{{ end }}'
 
   # The tray on Linux and Windows: no cgo needed.
@@ -70,6 +72,30 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Developer ID signing and Apple notarization of the macOS binaries, so
+# Gatekeeper accepts them without clearing the quarantine flag. Runs after the
+# builds and before archiving. Enabled only when the secrets exist, so snapshot
+# builds and forks keep the ad-hoc signature from the build hooks.
+#   MACOS_SIGN_P12        base64 of the "Developer ID Application" .p12
+#   MACOS_SIGN_PASSWORD   password of that .p12
+#   MACOS_NOTARY_ISSUER_ID, MACOS_NOTARY_KEY_ID
+#                         App Store Connect API key (Developer role)
+#   MACOS_NOTARY_KEY      base64 of that key's AuthKey_*.p8
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids: [h2ams, h2ams-tray-darwin]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        # Wait, so the draft release only ever holds accepted binaries.
+        wait: true
+        timeout: 20m
+
 # brew install --cask yvyty/tap/h2ams (macOS). Published only for final
 # releases, and only once the HOMEBREW_TAP_TOKEN secret exists: a
 # fine-grained token with Contents read/write on yvyty/homebrew-tap.
@@ -89,10 +115,13 @@ homebrew_casks:
     skip_upload: '{{ if and (isEnvSet "HOMEBREW_TAP_TOKEN") (not .Prerelease) }}false{{ else }}true{{ end }}'
     hooks:
       post:
-        # The binaries are ad-hoc signed, not notarized (Issue 4.2.2).
+        # Notarized releases need nothing here. Without the signing secrets
+        # the binaries are only ad-hoc signed, so clear the quarantine flag.
         # Casks are macOS-only, so no OS check is needed.
         install_steps: |
+          {{- if not (isEnvSet "MACOS_SIGN_P12") }}
           run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/h2ams", "{{ .StagedPath }}/h2ams-tray"]
+          {{- end }}
 
 changelog:
   use: github
@@ -107,6 +136,8 @@ release:
   draft: true # reviewed and published by hand
   prerelease: auto # tags like v0.1.0-rc.1 become prereleases
   footer: |
-    Install: see [Install](https://github.com/yvyty/h2ams#install). On macOS,
+    Install: see [Install](https://github.com/yvyty/h2ams#install).
+    {{- if not (isEnvSet "MACOS_SIGN_P12") }} On macOS,
     downloaded binaries are ad-hoc signed; run
     `xattr -d com.apple.quarantine h2ams h2ams-tray` once after unpacking.
+    {{- end }}
