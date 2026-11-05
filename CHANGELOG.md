@@ -7,6 +7,11 @@ All notable changes to h2ams. The format follows
 
 ## [Unreleased]
 
+### Changed
+- macOS binaries are signed with a Developer ID and notarized by Apple when
+  the release has the signing secrets, so Gatekeeper accepts them and the
+  Homebrew cask no longer strips the quarantine flag.
+
 ## [0.1.1] - 2026-11-02
 
 ### Fixed
