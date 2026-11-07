@@ -59,9 +59,9 @@ sudo mv h2ams h2ams-tray /usr/local/bin/
 ```
 
 On macOS, releases signed with a Developer ID and notarized by Apple run
-without any extra step. Releases that are only ad-hoc signed (0.1.1 and
-earlier) say so in their release notes; clear the download quarantine once
-for those (Homebrew does this for you):
+without any extra step. Releases that are only ad-hoc signed (every release
+so far, through 0.2.0) say so in their release notes; clear the download
+quarantine once for those (Homebrew does this for you):
 
 ```sh
 xattr -d com.apple.quarantine /usr/local/bin/h2ams /usr/local/bin/h2ams-tray
