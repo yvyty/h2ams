@@ -61,6 +61,16 @@ Each app needs a `command`. The `cwd` is relative to the config file. With no
 times in a row. The [configuration reference](../README.md#configuration) lists
 every field.
 
+Check the file before starting anything:
+
+```console
+$ h2ams validate
+/Users/you/my-project/h2ams.yml is valid
+```
+
+It lists every problem at once, including any `cwd` folder that doesn't
+exist.
+
 ## 3. Start everything
 
 ```console

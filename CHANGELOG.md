@@ -7,6 +7,13 @@ All notable changes to h2ams. The format follows
 
 ## [Unreleased]
 
+### Added
+- `h2ams validate` checks the config with the same rules as `h2ams up`, plus
+  that every app's `cwd` exists, without starting anything. `--env NAME` also
+  checks the environment, and `--json` prints `{"valid", "config",
+  "problems"}` for editors and scripts. It exits non-zero when the config is
+  invalid.
+
 ### Changed
 - macOS binaries are signed with a Developer ID and notarized by Apple when
   the release has the signing secrets, so Gatekeeper accepts them and the
