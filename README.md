@@ -98,6 +98,7 @@ Check it works with `h2ams --version`.
 cd my-project
 h2ams init            # writes a commented template h2ams.yml
 $EDITOR h2ams.yml     # describe your apps
+h2ams validate        # check it without starting anything
 h2ams up              # start the daemon and your apps
 h2ams status          # see state, PIDs, and ports
 h2ams logs api -f     # stream one app's output (Ctrl-C to stop)
@@ -170,6 +171,10 @@ Error: h2ams.yml: invalid config:
   - apps.web.restart.policy: must be one of always, on-failure, never; got "sometimes"
 ```
 
+`h2ams validate` runs the same checks without starting anything, and also
+reports any app whose `cwd` does not exist. `--json` prints the result for
+editors and scripts.
+
 ## Commands
 
 | Command | What it does |
@@ -182,6 +187,7 @@ Error: h2ams.yml: invalid config:
 | `h2ams stop <app>` | Stop one app and keep it stopped; everything else keeps running. |
 | `h2ams restart <app>` | Stop an app (if running) and start it again. |
 | `h2ams envs` | List environments and their apps, marking the default and the active one. |
+| `h2ams validate [--env NAME] [--json]` | Check the config with the same rules as `up`, plus that every app's `cwd` exists, without starting anything. Exits non-zero if invalid. |
 | `h2ams down` | Stop every app and the daemon. |
 
 Every command accepts `-c, --config PATH` (default `h2ams.yml`). Run

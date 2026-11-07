@@ -176,10 +176,7 @@ func Specs(cfg *config.Config, baseDir, project string, names []string, output f
 		if output != nil {
 			out = output(name)
 		}
-		dir := app.Cwd
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(baseDir, dir)
-		}
+		dir := app.Dir(baseDir)
 		spec := process.Spec{
 			Name:        name,
 			Command:     app.Command,

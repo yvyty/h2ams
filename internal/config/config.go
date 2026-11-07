@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -78,6 +79,15 @@ type App struct {
 	Cwd     string            `yaml:"cwd,omitempty"`
 	Env     map[string]string `yaml:"env,omitempty"` // for Docker apps, passed into the container
 	Restart Restart           `yaml:"restart,omitempty"`
+}
+
+// Dir returns the app's working directory: Cwd resolved against baseDir (the
+// config file's directory), or baseDir itself when Cwd is empty.
+func (a App) Dir(baseDir string) string {
+	if filepath.IsAbs(a.Cwd) {
+		return a.Cwd
+	}
+	return filepath.Join(baseDir, a.Cwd)
 }
 
 // Docker runs an app as a container through the docker CLI.
